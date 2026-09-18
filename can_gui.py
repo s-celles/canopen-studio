@@ -188,6 +188,7 @@ class CanStudioApp(tk.Tk):
 
         # Bus & Layer State
         self.bus: Optional[can.Bus] = None
+        self.sim_bus: Optional[can.Bus] = None  # separate tx bus for simulator on network interfaces
         self.canopen_layer: Optional[CANopenLayer] = None
         self.simulator: Optional[VirtualCanopenSimulator] = None
         self.running = False
@@ -1271,7 +1272,17 @@ class CanStudioApp(tk.Tk):
 
             # Start Virtual Simulator thread if requested (or forced by Virtual mode)
             if iface_key == "virtual" or self.simulate_var.get():
-                self.simulator = VirtualCanopenSimulator(self.bus if iface_key != "virtual" else channel)
+                if iface_key == "virtual":
+                    sim_arg = channel
+                elif self.simulate_var.get():
+                    # udp_multicast (and similar) cannot receive_own_messages, so the simulator
+                    # must send on a separate bus instance so frames travel through the network
+                    # stack and are received by self.bus.
+                    self.sim_bus = open_can_bus(iface_key, channel, bitrate)
+                    sim_arg = self.sim_bus
+                else:
+                    sim_arg = self.bus
+                self.simulator = VirtualCanopenSimulator(sim_arg)
                 self.simulator.start()
 
             # Set up CANopen stack layer and active profile
@@ -1316,6 +1327,13 @@ class CanStudioApp(tk.Tk):
         if self.simulator:
             self.simulator.stop()
             self.simulator = None
+
+        if self.sim_bus:
+            try:
+                self.sim_bus.shutdown()
+            except Exception:
+                pass
+            self.sim_bus = None
 
         if self.bus:
             try:
