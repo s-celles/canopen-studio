@@ -14,6 +14,9 @@ dependencies = [
     "pyserial>=3.5",
     "python-can>=4.4.0",
     "msgpack>=1.0.8",
+    "fastmcp>=2.0",
+    "a2a-sdk>=0.2",
+    "fastapi[standard]>=0.115",
 ]
 
 [dependency-groups]
@@ -38,13 +41,15 @@ ignore = ["E501"]  # Ignore line-length violations for long comments / strings
 [project.scripts]
 canopen-studio = "can_gui:main"
 can-sniffer = "can_sniffer:main"
+canopen-mcp = "can_mcp_server:main"
+canopen-a2a = "can_a2a_server:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["can_gui", "can_sniffer", "can_interfaces", "updater"]
+py-modules = ["can_gui", "can_sniffer", "can_interfaces", "can_mcp_server", "can_a2a_server", "updater"]
 packages = ["canopen_stack", "canopen_stack.decoders"]
 
 [tool.mypy]

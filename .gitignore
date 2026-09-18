@@ -19,6 +19,8 @@
 !/can_gui.py
 !/can_sniffer.py
 !/can_interfaces.py
+!/can_mcp_server.py
+!/can_a2a_server.py
 !/updater.py
 
 # 4. Whitelist CANopen protocol stack package and decoders

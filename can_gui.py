@@ -31,6 +31,13 @@ import csv
 import collections
 import webbrowser
 from typing import Optional, Dict, Any
+
+try:
+    import can_mcp_server as _mcp
+    import can_a2a_server as _a2a
+    _SERVERS_AVAILABLE = True
+except ImportError:
+    _SERVERS_AVAILABLE = False
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -231,6 +238,15 @@ class CanStudioApp(tk.Tk):
 
         self._create_widgets()
         self._init_interface_selection()
+
+        # Start MCP and A2A servers in background daemon threads
+        if _SERVERS_AVAILABLE:
+            _mcp.set_app(self)
+            _a2a.set_app(self)
+            _mcp.start_in_thread()
+            _a2a.start_in_thread()
+            print(f"MCP server: http://localhost:{_mcp.MCP_PORT}/sse")
+            print(f"A2A server: http://localhost:{_a2a.A2A_PORT}/.well-known/agent.json")
 
         # Non-blocking background update check
         threading.Thread(target=self._background_update_check, daemon=True).start()
@@ -1246,6 +1262,75 @@ class CanStudioApp(tk.Tk):
         )
         txt.insert(tk.END, ref_content)
         txt.configure(state=tk.DISABLED)
+
+    # =========================================================================
+    # =========================================================================
+    # Thread-safe API for MCP / A2A servers
+    # =========================================================================
+
+    def get_status_dict(self) -> Dict[str, Any]:
+        iface_key = self._get_selected_iface_key() if hasattr(self, "_get_selected_iface_key") else "unknown"
+        return {
+            "connected": self.bus is not None,
+            "interface": iface_key,
+            "simulate": getattr(self, "simulate_var", None) and self.simulate_var.get(),
+            "stats": dict(self.stats),
+            "message": "Connected" if self.bus else "Not connected — call connect() first",
+        }
+
+    def get_trace_json(self, n: int = 50) -> list:
+        msgs = list(self.captured_messages)[-n:]
+        return [
+            {
+                "timestamp": m[0],
+                "type": m[1],
+                "id": m[2],
+                "dlc": m[3],
+                "data": m[4],
+                "decoded": m[5],
+            }
+            for m in msgs
+        ]
+
+    def get_network_dict(self) -> Dict[str, Any]:
+        return {
+            "discovered_nodes": dict(self.discovered_nodes),
+            "telemetry": dict(self.telemetry_data),
+            "stats": dict(self.stats),
+        }
+
+    def connect_from_mcp(self, interface: str, channel: str, bitrate: int, simulate: bool) -> str:
+        """Connect to a CAN bus from MCP/A2A (runs in a background thread)."""
+        import tkinter as _tk
+        if self.bus:
+            return "Already connected. Disconnect first."
+        try:
+            from can_interfaces import open_can_bus as _open, VirtualCanopenSimulator as _Sim
+            from canopen_stack import CANopenLayer as _Layer, get_default_registry as _reg
+            self.bus = _open(interface, channel, bitrate)
+            if simulate:
+                self.sim_bus = _open(interface, channel, bitrate)
+                self.simulator = _Sim(self.sim_bus)
+                self.simulator.start()
+            self.canopen_layer = _Layer(bus=self.bus, registry=_reg())
+            self.running = True
+            self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
+            self.rx_thread.start()
+            # Update GUI status on the main thread
+            self.after(0, lambda: self.status_lbl.configure(
+                text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
+            ))
+            self.after(0, lambda: self.btn_connect.configure(text="Disconnect"))
+            return f"Connected to {interface} [{channel}]" + (" + simulator" if simulate else "")
+        except Exception as exc:
+            return f"Connection failed: {exc}"
+
+    def disconnect_from_mcp(self) -> str:
+        """Disconnect from MCP/A2A (runs in a background thread)."""
+        if not self.bus:
+            return "Not connected."
+        self.after(0, self._disconnect)
+        return "Disconnecting…"
 
     # =========================================================================
     # Connection Management & Processing Loop
