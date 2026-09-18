@@ -59,7 +59,7 @@ jobs:
           Compress-Archive -Path dist/CANopen-Studio/* -DestinationPath dist/CANopen-Studio-Windows-x64-Portable.zip -Force
 
       - name: Publish GitHub Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
