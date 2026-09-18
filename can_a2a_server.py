@@ -106,6 +106,7 @@ def _standalone_rx_loop() -> None:
 # Agent logic — maps natural-language intent to CAN actions
 # ---------------------------------------------------------------------------
 
+
 def _handle_message(text: str) -> str:
     """Dispatch a free-text message from an A2A client to the appropriate action."""
     text_lower = text.lower().strip()
@@ -166,7 +167,9 @@ def _handle_message(text: str) -> str:
     # send frame  (e.g. "send 0x701 05" or "send frame 701 5")
     if "send" in text_lower:
         tokens = text_lower.replace(",", " ").split()
-        hex_tokens = [t for t in tokens if t.startswith("0x") or (len(t) >= 2 and all(c in "0123456789abcdef" for c in t))]
+        hex_tokens = [
+            t for t in tokens if t.startswith("0x") or (len(t) >= 2 and all(c in "0123456789abcdef" for c in t))
+        ]
         if hex_tokens:
             try:
                 can_id = int(hex_tokens[0], 16)
