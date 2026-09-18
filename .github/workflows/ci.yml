@@ -33,6 +33,18 @@ jobs:
       - name: Lint codebase (ruff check)
         run: uv run ruff check .
 
+      - name: Static Type Checking (mypy)
+        run: uv run mypy .
+
+      - name: Security Linting (bandit)
+        run: uv run bandit -c pyproject.toml -r .
+
+      - name: Dependency Vulnerability Check (safety)
+        run: uv run safety check || true  # Using true to prevent failing on upstream vulns unless explicitly configured
+
+      - name: Run pre-commit hooks
+        run: uv run pre-commit run --all-files
+
   test:
     name: Tests on Python ${{ matrix.python-version }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

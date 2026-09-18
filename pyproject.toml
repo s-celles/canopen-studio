@@ -19,6 +19,10 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.8.0",
+    "mypy>=1.11.2",
+    "bandit>=1.7.9",
+    "safety>=3.2.7",
+    "pre-commit>=3.8.0",
 ]
 
 [tool.ruff]
@@ -41,3 +45,17 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 py-modules = ["can_gui", "can_sniffer", "can_interfaces", "updater"]
 packages = ["canopen_stack", "canopen_stack.decoders"]
+
+[tool.mypy]
+ignore_missing_imports = true
+disable_error_code = ["attr-defined", "valid-type", "assignment", "operator", "no-any-return", "union-attr"]
+
+[[tool.mypy.overrides]]
+module = [
+    "numpy.*",
+    "matplotlib.*",
+    "serial.*",
+    "can.*"
+]
+ignore_missing_imports = true
+ignore_errors = true

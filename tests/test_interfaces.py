@@ -34,7 +34,7 @@ class TestVirtualCanopenSimulator:
         """Test Virtual Simulator starts, emits heartbeats and TPDOs."""
         channel_name = "test_sim_traffic"
         bus = can.Bus(channel=channel_name, interface="virtual")
-        sim = VirtualCanopenSimulator(channel=channel_name)
+        sim = VirtualCanopenSimulator(channel_or_bus=channel_name)
 
         received_frames = []
 
@@ -61,7 +61,7 @@ class TestVirtualCanopenSimulator:
         """Test Virtual Simulator responds to SDO read of Device Type (Index 0x1000)."""
         channel_name = "test_sim_sdo"
         bus = can.Bus(channel=channel_name, interface="virtual")
-        sim = VirtualCanopenSimulator(channel=channel_name)
+        sim = VirtualCanopenSimulator(channel_or_bus=channel_name)
 
         try:
             sim.start()
