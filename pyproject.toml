@@ -13,6 +13,7 @@ dependencies = [
     "matplotlib>=3.10.9",
     "pyserial>=3.5",
     "python-can>=4.4.0",
+    "msgpack>=1.0.8",
 ]
 
 [dependency-groups]

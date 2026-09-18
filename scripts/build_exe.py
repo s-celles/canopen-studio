@@ -59,6 +59,8 @@ def main():
         "--hidden-import=can.interfaces.ixxat",
         "--hidden-import=can.interfaces.gs_usb",
         "--hidden-import=can.interfaces.socketcan",
+        "--hidden-import=can.interfaces.udp_multicast",
+        "--hidden-import=msgpack",
         "--hidden-import=matplotlib.backends.backend_tkagg",
         "--hidden-import=canopen",
         "--collect-submodules=canopen_stack",
