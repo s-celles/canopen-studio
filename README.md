@@ -28,7 +28,7 @@
 
 ### Option A: Standalone Windows Installer (.exe) — No Python required
 Download the latest setup wizard from **[GitHub Releases](https://github.com/s-celles/canopen-studio/releases)**:
-- **`CANopen-Studio-v0.2.0-Windows-Setup.exe`** (Setup wizard with desktop & start menu shortcuts)
+- **`CANopen-Studio-v0.2.1-Windows-Setup.exe`** (Setup wizard with desktop & start menu shortcuts)
 - **`CANopen-Studio-Windows-x64-Portable.zip`** (Standalone portable executable)
 
 ### Option B: 1-Click Local Installer (`install.bat`)

@@ -264,7 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="canopen-studio 0.2.0 - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
+        version="canopen-studio 0.2.1 - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
     )
     parser.add_argument(
         "-I",

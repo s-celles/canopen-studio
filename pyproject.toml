@@ -1,6 +1,6 @@
 [project]
 name = "canopen-studio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Universal CAN & CANopen protocol analyzer, telemetry plotter, and transmit station"
 readme = "README.md"
 requires-python = ">=3.10"

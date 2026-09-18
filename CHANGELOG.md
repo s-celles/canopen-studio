@@ -5,8 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-09-18
+## [0.2.1] - 2026-09-18
 
+### Added
+- Automated macOS installation script (`install.sh` and `scripts/install_macos.sh`) creating a native `.app` wrapper bundle on the user's Desktop.
+- Automated Linux installation script (`scripts/install_linux.sh`) generating a standard `.desktop` application menu entry.
+- Added Python best practices to `AGENTS.md` based on `cookiecutter-python-package` recommendations (pre-commit, mypy, bandit, safety).
+
+## [0.2.0] - 2026-09-18
 ### Added
 - Generalized multi-interface hardware support: SLCAN (Lawicel, USBtin, CANable), PEAK PCAN, Kvaser, Vector, IXXAT, gs_usb, SocketCAN, and Virtual Simulator.
 - Extensible protocol decoding architecture with generic CiA 301/402, SEVCON Gen4, De Haardt, J1939, and Raw CAN profiles.

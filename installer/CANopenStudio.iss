@@ -3,7 +3,7 @@
 ; License: GPL-3.0-or-later
 
 #define MyAppName "CAN & CANopen Studio"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.2.1"
 #define MyAppPublisher "Sébastien Celles"
 #define MyAppURL "https://github.com/s-celles/canopen-studio"
 #define MyAppExeName "CANopen-Studio.exe"

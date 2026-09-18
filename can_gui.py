@@ -1660,7 +1660,7 @@ class CanStudioApp(tk.Tk):
             foreground="#007acc",
         ).pack(pady=(0, 6))
 
-        ttk.Label(f, text="Version 0.2.0", font=("Segoe UI", 9, "italic"), foreground="#666666").pack(pady=(0, 8))
+        ttk.Label(f, text="Version 0.2.1", font=("Segoe UI", 9, "italic"), foreground="#666666").pack(pady=(0, 8))
 
         info_box = ttk.LabelFrame(f, text=" Project & Author ", padding=10)
         info_box.pack(fill=tk.X, pady=4)

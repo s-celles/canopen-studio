@@ -15,13 +15,13 @@ import urllib.request
 import urllib.error
 from typing import Tuple, Optional, Dict, Any, Callable
 
-CURRENT_VERSION = "0.2.0"
+CURRENT_VERSION = "0.2.1"
 GITHUB_REPO = "s-celles/canopen-studio"
 
 
 def parse_version_tuple(version_str: str) -> Tuple[int, ...]:
     """
-    Parse a version string (e.g. '0.2.0' or 'v1.4.12') into a tuple of integers.
+    Parse a version string (e.g. '0.2.1' or 'v1.4.12') into a tuple of integers.
     """
     cleaned = version_str.strip().lstrip("vV")
     parts = re.findall(r"\d+", cleaned)
