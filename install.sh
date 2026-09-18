@@ -10,8 +10,10 @@ echo ""
 
 if [ "$(uname)" == "Darwin" ]; then
     bash "$(dirname "$0")/scripts/install_macos.sh"
+elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
+    bash "$(dirname "$0")/scripts/install_linux.sh"
 else
-    echo "Linux installation script not implemented yet."
+    echo "Unsupported OS for automated installer: $(uname)"
     echo "You can still run the app using 'uv run can_gui.py'."
-    exit 0
+    exit 1
 fi
