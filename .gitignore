@@ -1,0 +1,44 @@
+# ==============================================================================
+# Git Allowlist Configuration (Default Deny / Whitelist)
+# Ignore everything by default, explicitly allowlist tracked files & directories
+# ==============================================================================
+
+# 1. Ignore all files and directories by default
+/*
+/.*
+
+# 2. Whitelist project configuration and metadata
+!/.gitignore
+!/LICENSE
+!/README.md
+!/pyproject.toml
+!/uv.lock
+!/justfile
+
+# 3. Whitelist Python application source files
+!/can_gui.py
+!/can_sniffer.py
+!/can_interfaces.py
+
+# 4. Whitelist CANopen protocol stack package and decoders
+!/canopen_stack/
+!/canopen_stack/**
+
+# 5. Whitelist documentation assets and screenshots
+!/docs/
+!/docs/**
+
+# ==============================================================================
+# Explicitly re-ignore caches, virtual environments, and temporary data
+# ==============================================================================
+**/__pycache__/
+**/*.py[cod]
+**/*$py.class
+**/.venv/
+**/*.csv
+**/*.log
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.DS_Store
+Thumbs.db

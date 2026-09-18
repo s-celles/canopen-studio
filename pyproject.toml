@@ -1,0 +1,19 @@
+[project]
+name = "canopen-studio"
+version = "0.2.0"
+description = "Universal CAN & CANopen protocol analyzer, telemetry plotter, and transmit station"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Sébastien Celles" }
+]
+license = { text = "GPL-3.0-or-later" }
+dependencies = [
+    "canopen>=2.4.1",
+    "matplotlib>=3.10.9",
+    "pyserial>=3.5",
+    "python-can>=4.4.0",
+]
+
+[tool.uv]
+package = false
