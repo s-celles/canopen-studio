@@ -275,6 +275,10 @@ class CanStudioApp(tk.Tk):
         self.channel_combo = ttk.Combobox(top_bar, width=14)
         self.channel_combo.pack(side=tk.LEFT, padx=3)
 
+        self.simulate_var = tk.BooleanVar(value=False)
+        self.chk_simulate = ttk.Checkbutton(top_bar, text="Simulate", variable=self.simulate_var)
+        self.chk_simulate.pack(side=tk.LEFT, padx=2)
+
         self.btn_refresh = ttk.Button(top_bar, text="↻", width=3, command=self._refresh_channels)
         self.btn_refresh.pack(side=tk.LEFT, padx=2)
 
@@ -1265,9 +1269,9 @@ class CanStudioApp(tk.Tk):
                 )
                 return
 
-            # Start Virtual Simulator thread if Virtual mode selected
-            if iface_key == "virtual":
-                self.simulator = VirtualCanopenSimulator(channel)
+            # Start Virtual Simulator thread if requested (or forced by Virtual mode)
+            if iface_key == "virtual" or self.simulate_var.get():
+                self.simulator = VirtualCanopenSimulator(self.bus if iface_key != "virtual" else channel)
                 self.simulator.start()
 
             # Set up CANopen stack layer and active profile

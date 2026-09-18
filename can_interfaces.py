@@ -78,6 +78,15 @@ SUPPORTED_INTERFACES = {
         "needs_serial_baud": False,
         "description": "Linux kernel native SocketCAN network interface",
     },
+    "udp_multicast": {
+        "name": "UDP Multicast (Network CAN over IP)",
+        "backend": "udp_multicast",
+        "has_ports": False,
+        "default_channels": ["224.0.0.1", "239.0.0.1"],
+        "default_bitrate": 0,
+        "needs_serial_baud": False,
+        "description": "Virtual CAN bus over local IP network via UDP multicast",
+    },
     "virtual": {
         "name": "Virtual Simulator (Demo & Teaching loopback)",
         "backend": "virtual",
@@ -156,33 +165,32 @@ class VirtualCanopenSimulator:
     - Reacts to NMT master commands (0x000)
     """
 
-    def __init__(self, channel: Any = "virtual_bus"):
-        if isinstance(channel, str):
-            self.channel = channel
-        else:
-            self.channel = "virtual_bus"
+    def __init__(self, channel_or_bus: Any = "virtual_bus"):
         self.sim_bus: Optional[can.Bus] = None
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.nmt_state_node1 = 0x05  # Operational
-        self.nmt_state_node2 = 0x7F  # Pre-Operational
-        self.sim_rpm = 0
-        self.sim_temp = 32
+        self.channel = "virtual_bus"
+        self._owns_bus = False
+
+        if hasattr(channel_or_bus, "send") and hasattr(channel_or_bus, "recv"):
+            self.sim_bus = channel_or_bus
+        elif isinstance(channel_or_bus, str):
+            self.channel = channel_or_bus
 
     def start(self):
         if self.running:
             return
-        try:
-            self.sim_bus = can.Bus(interface="virtual", channel=self.channel)
-        except Exception:
-            return
+        if self.sim_bus is None:
+            try:
+                self.sim_bus = can.Bus(interface="virtual", channel=self.channel)
+                self._owns_bus = True
+            except Exception:
+                return
         self.running = True
         self.thread = threading.Thread(target=self._sim_loop, daemon=True)
         self.thread.start()
 
     def stop(self):
         self.running = False
-        if self.sim_bus:
+        if self.sim_bus and self._owns_bus:
             try:
                 self.sim_bus.shutdown()
             except Exception:
