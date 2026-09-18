@@ -24,6 +24,12 @@ format:
     uv run ruff format .
     uv run ruff check --fix .
 
+# Run full local quality verification (format check, linting, tests)
+check:
+    uv run ruff format --check .
+    uv run ruff check .
+    uv run pytest -v
+
 
 # Launch full graphical studio (Network Monitor, Reverse Plotter, Trace, Transmit, SDO Explorer)
 gui:
