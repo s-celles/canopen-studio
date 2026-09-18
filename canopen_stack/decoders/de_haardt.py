@@ -2,7 +2,7 @@
 Application-specific decoder extension for De Haardt Kart Safety Transponders (Xtra.CAN).
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from ..base_decoder import BaseDeviceDecoder
 from ..types import CanopenMessage
 from ..registry import register_decoder

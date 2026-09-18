@@ -4,7 +4,7 @@ Translates raw CAN frames into structured CANopen services and manages network s
 """
 
 import time
-from typing import Optional, Dict, Callable, List
+from typing import Optional, Dict, Callable, List, Any
 import can
 
 from .types import CanopenMessage, CanopenService, NmtState, NmtCommand

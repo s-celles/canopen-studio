@@ -80,7 +80,9 @@ class SevconGen4Decoder(BaseDeviceDecoder):
             signals["heatsink_temp_c"] = t_heatsink
             signals["motor_temp_raw"] = t_motor_raw
             signals["aux_voltage"] = aux_val
-            message.decoded_info = f"SEVCON TPDO3 [Temps] -> Heatsink: {t_heatsink}°C, MotorRaw: {t_motor_raw}, Aux: {aux_val}"
+            message.decoded_info = (
+                f"SEVCON TPDO3 [Temps] -> Heatsink: {t_heatsink}°C, MotorRaw: {t_motor_raw}, Aux: {aux_val}"
+            )
             return signals
 
         # 5. TPDO4 (0x270): Target Torque and Speed Limiter (0x5100:02..04, 0x6071:00)
@@ -91,7 +93,9 @@ class SevconGen4Decoder(BaseDeviceDecoder):
             signals["control_mode"] = mode
             signals["speed_limit_step"] = spd_lim
             signals["target_torque"] = torque
-            message.decoded_info = f"SEVCON TPDO4 [Torque] -> TargetTorque(0x6071): {torque} | SpeedStep: {spd_lim} | Mode: {mode}"
+            message.decoded_info = (
+                f"SEVCON TPDO4 [Torque] -> TargetTorque(0x6071): {torque} | SpeedStep: {spd_lim} | Mode: {mode}"
+            )
             return signals
 
         # 6. TPDO5 (0x473): Motor Speed RPM (0x606C:00) & Max Speed (0x6080:00)

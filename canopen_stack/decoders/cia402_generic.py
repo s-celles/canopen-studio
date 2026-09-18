@@ -9,7 +9,7 @@ Copyright (C) 2026 Sébastien Celles
 
 from typing import Optional, Dict, Any, List
 from ..base_decoder import BaseDeviceDecoder
-from ..types import CanopenMessage, NmtState
+from ..types import CanopenMessage
 from ..registry import register_decoder
 
 

@@ -36,7 +36,32 @@ The application supports multiple commercial CAN adapters via `python-can` drive
 
 ---
 
-## 3. Project Management with `just` and `uv`
+## 3. Installation Options
+
+CAN & CANopen Studio offers three installation and execution methods tailored to your workflow:
+
+### Option A: Standalone Windows Setup (.exe) — No Python required
+For workshop technicians, students, or lab benches without Python:
+1. Download the latest **`CANopen-Studio-Windows-Setup.exe`** (or portable `.zip`) from [GitHub Releases](https://github.com/s-celles/canopen-studio/releases).
+2. Run the installer wizard to create Desktop and Start Menu shortcuts.
+
+### Option B: 1-Click Local Installer (`install.bat`)
+If you clone or download this repository:
+1. Double-click **`install.bat`** (or run `just install`).
+2. The installer automatically downloads `uv` if needed, sets up the virtual environment, and creates a **CANopen Studio** shortcut on your Desktop with the custom icon.
+
+### Option C: Python CLI / Tool Installation (`uv tool` or `pip`)
+Install directly as a global system tool:
+```bash
+uv tool install git+https://github.com/s-celles/canopen-studio.git
+# Then launch anytime:
+canopen-studio
+can-sniffer --help
+```
+
+---
+
+## 4. Project Management with `just` and `uv`
 
 The project uses a modern **`pyproject.toml`** (PEP 621) with **`uv`** and **`just`** task automation.
 
@@ -46,6 +71,10 @@ The project uses a modern **`pyproject.toml`** (PEP 621) with **`uv`** and **`ju
 | :--- | :--- |
 | `just` | Show list of available recipes |
 | `just setup` | Sync dependencies and lockfile (`uv sync`) |
+| `just install` | Run 1-click Windows installer (Desktop & Start Menu shortcuts) |
+| `just build-exe` | Build standalone Windows executable folder with PyInstaller |
+| `just build-portable` | Build single-file portable Windows executable (.exe) |
+| `just generate-icon` | Generate custom application icons (.ico / .png) |
 | `just sniff` | Run sniffer at 500 kbit/s |
 | `just sniff 250000` | Run sniffer at 250 kbit/s |
 | `just gui` | Start full application (Dashboard, Trace, Frame Transmitter, SDO) |
@@ -113,6 +142,7 @@ To add support for a new device on the bus (e.g. a Battery Management System or 
 
 ```python
 from canopen_stack import BaseDeviceDecoder, CanopenMessage, register_decoder
+
 
 @register_decoder
 class MyBmsDecoder(BaseDeviceDecoder):

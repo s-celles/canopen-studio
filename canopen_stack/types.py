@@ -2,9 +2,9 @@
 Type definitions, enumerations, and data classes for the CANopen stack.
 """
 
-from enum import Enum, auto
+from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 
 
 class NmtState(Enum):
@@ -53,6 +53,7 @@ class CanopenService(Enum):
 @dataclass
 class CanopenMessage:
     """Represents a message parsed at the CANopen layer."""
+
     arbitration_id: int
     is_extended: bool
     dlc: int

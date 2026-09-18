@@ -33,4 +33,5 @@ __all__ = [
     "DecoderRegistry",
     "register_decoder",
     "get_default_registry",
+    "decoders",
 ]

@@ -2,7 +2,7 @@
 Plugin registry and extension manager for application-specific CANopen decoders.
 """
 
-from typing import List, Dict, Type, Optional
+from typing import List, Type, Optional
 from .base_decoder import BaseDeviceDecoder
 from .types import CanopenMessage
 

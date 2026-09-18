@@ -11,6 +11,20 @@ setup:
     @echo "==> Syncing project with uv..."
     uv sync
 
+# Run test suite with pytest
+test:
+    uv run pytest -v
+
+# Check code style and linting with Ruff
+lint:
+    uv run ruff check .
+
+# Automatically fix linting and formatting with Ruff
+format:
+    uv run ruff format .
+    uv run ruff check --fix .
+
+
 # Launch full graphical studio (Network Monitor, Reverse Plotter, Trace, Transmit, SDO Explorer)
 gui:
     uv run python can_gui.py
@@ -57,5 +71,21 @@ sample count="20":
 
 # Clean temporary files, caches, and logs
 clean:
-    Get-ChildItem -Path . -Include __pycache__,*.csv,.pytest_cache -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path . -Include __pycache__,*.csv,.pytest_cache,build,dist -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# Run 1-click Windows installer (sets up environment and creates Desktop & Start Menu shortcuts)
+install:
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_windows.ps1
+
+# Generate application icon assets (.ico and .png)
+generate-icon:
+    uv run --with pillow python scripts/generate_icon.py
+
+# Build standalone Windows executable folder with PyInstaller
+build-exe:
+    uv run --with pyinstaller python scripts/build_exe.py --clean
+
+# Build single-file portable Windows executable (.exe)
+build-portable:
+    uv run --with pyinstaller python scripts/build_exe.py --clean --onefile
 

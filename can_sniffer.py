@@ -13,12 +13,9 @@ import argparse
 import csv
 from typing import Optional
 
-import serial.tools.list_ports
-import can
 
 from canopen_stack import (
     CANopenLayer,
-    NmtState,
     get_default_registry,
 )
 from can_interfaces import (
@@ -71,7 +68,9 @@ def run_sniffer(
     if max_duration:
         print(f" Max Duration    : {max_duration} seconds")
     print("=" * 80)
-    print(f"{'Time (s)':<10} | {'Type':<4} | {'ID (Hex)':<10} | {'DLC':<3} | {'Data (Hex)':<24} | {'CANopen / Application Decode'}")
+    print(
+        f"{'Time (s)':<10} | {'Type':<4} | {'ID (Hex)':<10} | {'DLC':<3} | {'Data (Hex)':<24} | {'CANopen / Application Decode'}"
+    )
     print("-" * 110)
 
     f_csv = None
@@ -235,7 +234,7 @@ def run_live_dashboard(interface: str, channel: str, bitrate: int, profile: str 
                     f"===============================================================\n"
                     f"             CAN & CANopen REAL-TIME DASHBOARD\n"
                     f"===============================================================\n"
-                    f" Interface: {interface} [{channel}] | Bitrate: {bitrate/1000:g} kbps | Frames: {state['total_msgs']}\n"
+                    f" Interface: {interface} [{channel}] | Bitrate: {bitrate / 1000:g} kbps | Frames: {state['total_msgs']}\n"
                     f" Profile: {profile}  |  Nodes Active: {len(canopen_layer.node_states)}\n"
                     f"---------------------------------------------------------------\n"
                     f" Controller Status (Heartbeat) : {hb_status}\n"
@@ -258,30 +257,35 @@ def run_live_dashboard(interface: str, channel: str, bitrate: int, profile: str 
         bus.shutdown()
 
 
-def main():
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Universal CAN & CANopen sniffer, protocol analyzer, and telemetry monitor."
     )
     parser.add_argument(
         "--version",
         action="version",
-        version="canopen-kart 0.2.0 - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
+        version="canopen-studio 0.2.0 - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
     )
     parser.add_argument(
-        "-I", "--interface",
+        "-I",
+        "--interface",
         type=str,
         default="slcan",
         choices=list(SUPPORTED_INTERFACES.keys()),
         help="CAN hardware interface type (slcan, pcan, kvaser, vector, ixxat, gs_usb, socketcan, virtual).",
     )
     parser.add_argument(
-        "-c", "--channel", "-p", "--port",
+        "-c",
+        "--channel",
+        "-p",
+        "--port",
         type=str,
         default=None,
         help="Interface channel (e.g. COM4 for slcan, PCAN_USBBUS1 for pcan, 0 for kvaser/vector/ixxat, can0 for socketcan).",
     )
     parser.add_argument(
-        "-b", "--bitrate",
+        "-b",
+        "--bitrate",
         type=int,
         default=500000,
         choices=STANDARD_BITRATES,
@@ -291,7 +295,14 @@ def main():
         "--profile",
         type=str,
         default="All / Auto",
-        choices=["All / Auto", "CiA 402 Generic Drive", "SEVCON Gen4 Inverter", "De Haardt Safety Transponder", "J1939 Extended (29-bit)", "Raw CAN (No Decoders)"],
+        choices=[
+            "All / Auto",
+            "CiA 402 Generic Drive",
+            "SEVCON Gen4 Inverter",
+            "De Haardt Safety Transponder",
+            "J1939 Extended (29-bit)",
+            "Raw CAN (No Decoders)",
+        ],
         help="Active device decoder profile.",
     )
     parser.add_argument(
@@ -305,7 +316,8 @@ def main():
         help="Display Standard (11-bit) frames ONLY.",
     )
     parser.add_argument(
-        "-i", "--id",
+        "-i",
+        "--id",
         type=lambda x: int(x, 0),
         default=None,
         help="Filter for a specific CAN ID in hex or dec (e.g. 0x473 or 0x18FF0101).",
@@ -316,19 +328,22 @@ def main():
         help="Enable passive listen-only mode (no ACK frames sent on bus).",
     )
     parser.add_argument(
-        "-o", "--log",
+        "-o",
+        "--log",
         type=str,
         default=None,
         help="Path to save captured frames as a CSV file.",
     )
     parser.add_argument(
-        "-n", "--count",
+        "-n",
+        "--count",
         type=int,
         default=None,
         help="Stop after capturing N frames.",
     )
     parser.add_argument(
-        "-t", "--duration",
+        "-t",
+        "--duration",
         type=float,
         default=None,
         help="Capture duration in seconds (e.g. -t 10 for 10 seconds).",
@@ -343,8 +358,15 @@ def main():
         action="store_true",
         help="Start virtual simulation nodes emitting synthetic CANopen traffic.",
     )
+    return parser
 
-    args = parser.parse_args()
+
+def parse_args(argv=None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def main():
+    args = parse_args()
 
     channel = args.channel
     if not channel:

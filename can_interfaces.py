@@ -190,7 +190,6 @@ class VirtualCanopenSimulator:
             self.sim_bus = None
 
     def _sim_loop(self):
-        t0 = time.time()
         last_hb = 0.0
         last_sync = 0.0
         last_pdo = 0.0
@@ -222,9 +221,13 @@ class VirtualCanopenSimulator:
                 try:
                     if self.sim_bus:
                         # Node 1 Heartbeat
-                        self.sim_bus.send(can.Message(arbitration_id=0x701, is_extended_id=False, data=[self.nmt_state_node1]))
+                        self.sim_bus.send(
+                            can.Message(arbitration_id=0x701, is_extended_id=False, data=[self.nmt_state_node1])
+                        )
                         # Node 2 Heartbeat
-                        self.sim_bus.send(can.Message(arbitration_id=0x702, is_extended_id=False, data=[self.nmt_state_node2]))
+                        self.sim_bus.send(
+                            can.Message(arbitration_id=0x702, is_extended_id=False, data=[self.nmt_state_node2])
+                        )
                 except Exception:
                     pass
                 last_hb = now
@@ -232,6 +235,7 @@ class VirtualCanopenSimulator:
             # 3. TPDOs at 25 Hz (every 40 ms)
             if now - last_pdo >= 0.040:
                 import math
+
                 angle += 0.08
                 # Sine wave oscillating between 400 and 3200 RPM
                 self.sim_rpm = int(1800 + 1400 * math.sin(angle))
@@ -246,19 +250,33 @@ class VirtualCanopenSimulator:
 
                         # Standard CiA 402 TPDO2 (0x281): Statusword + Velocity Actual Value
                         vel_bytes = self.sim_rpm.to_bytes(4, "little", signed=True)
-                        self.sim_bus.send(can.Message(arbitration_id=0x281, is_extended_id=False, data=sw_bytes + vel_bytes))
+                        self.sim_bus.send(
+                            can.Message(arbitration_id=0x281, is_extended_id=False, data=sw_bytes + vel_bytes)
+                        )
 
                         # SEVCON TPDO5 (0x473): Max Speed (5000 RPM) + Actual Speed
                         max_rpm_bytes = (5000).to_bytes(4, "little", signed=True)
-                        self.sim_bus.send(can.Message(arbitration_id=0x473, is_extended_id=False, data=max_rpm_bytes + vel_bytes))
+                        self.sim_bus.send(
+                            can.Message(arbitration_id=0x473, is_extended_id=False, data=max_rpm_bytes + vel_bytes)
+                        )
 
                         # SEVCON TPDO4 (0x270): Mode 3 + Target Torque
                         trq_bytes = torque_val.to_bytes(2, "little", signed=True)
-                        self.sim_bus.send(can.Message(arbitration_id=0x270, is_extended_id=False, data=bytes([3, 4, 0, 0, 0]) + trq_bytes + bytes([0])))
+                        self.sim_bus.send(
+                            can.Message(
+                                arbitration_id=0x270,
+                                is_extended_id=False,
+                                data=bytes([3, 4, 0, 0, 0]) + trq_bytes + bytes([0]),
+                            )
+                        )
 
                         # SEVCON TPDO3 (0x156): Temps & Voltages (Heatsink temp at bytes 6..7)
                         hs_bytes = self.sim_temp.to_bytes(2, "little", signed=True)
-                        self.sim_bus.send(can.Message(arbitration_id=0x156, is_extended_id=False, data=bytes([0, 0, 10, 0, 50, 0]) + hs_bytes))
+                        self.sim_bus.send(
+                            can.Message(
+                                arbitration_id=0x156, is_extended_id=False, data=bytes([0, 0, 10, 0, 50, 0]) + hs_bytes
+                            )
+                        )
 
                 except Exception:
                     pass

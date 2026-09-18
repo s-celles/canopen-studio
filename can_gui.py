@@ -25,13 +25,11 @@ Features:
 """
 
 import os
-import sys
 import time
 import threading
 import csv
 import collections
-from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, Any
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
@@ -42,7 +40,6 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from canopen_stack import (
     CANopenLayer,
     NmtState,
-    NmtCommand,
     get_default_registry,
 )
 from can_interfaces import (
@@ -68,18 +65,90 @@ BYTE_COLORS = [
 
 # Standard CAN & CANopen Frame Templates for transmission experimentation
 FRAME_TEMPLATES = {
-    "CANopen NMT Start (Node 1)": {"id": "0x000", "ext": False, "rtr": False, "data": "01 01", "desc": "Start Node 1 -> Operational"},
-    "CANopen NMT Broadcast Start (All Nodes)": {"id": "0x000", "ext": False, "rtr": False, "data": "01 00", "desc": "Start all bus nodes"},
-    "CANopen NMT Pre-Op (Node 1)": {"id": "0x000", "ext": False, "rtr": False, "data": "80 01", "desc": "Switch Node 1 to Pre-Operational"},
-    "CANopen NMT Stop (Node 1)": {"id": "0x000", "ext": False, "rtr": False, "data": "02 01", "desc": "Stop Node 1 communication"},
-    "CANopen NMT Reset Node (Node 1)": {"id": "0x000", "ext": False, "rtr": False, "data": "81 01", "desc": "Reset Node 1"},
-    "CANopen SYNC Clock": {"id": "0x080", "ext": False, "rtr": False, "data": "", "desc": "CiA 301 Synchronisation pulse"},
-    "CiA 402 Drive - Ready to Switch On": {"id": "0x201", "ext": False, "rtr": False, "data": "06 00", "desc": "RPDO1 Controlword 0x0006"},
-    "CiA 402 Drive - Switch On": {"id": "0x201", "ext": False, "rtr": False, "data": "07 00", "desc": "RPDO1 Controlword 0x0007"},
-    "CiA 402 Drive - Enable Operation": {"id": "0x201", "ext": False, "rtr": False, "data": "0F 00", "desc": "RPDO1 Controlword 0x000F"},
-    "CiA 402 Drive - Target Velocity (1000 RPM)": {"id": "0x301", "ext": False, "rtr": False, "data": "0F 00 E8 03 00 00", "desc": "RPDO2 Velocity 1000"},
-    "SEVCON Gen4 - Throttle Request": {"id": "0x270", "ext": False, "rtr": False, "data": "03 04 00 00 00 64 00", "desc": "RPDO1 Mode 3, Torque 100"},
-    "J1939 - Address Claim Request": {"id": "0x18EAFFFE", "ext": True, "rtr": False, "data": "00 EE 00", "desc": "Request Address Claimed PGN"},
+    "CANopen NMT Start (Node 1)": {
+        "id": "0x000",
+        "ext": False,
+        "rtr": False,
+        "data": "01 01",
+        "desc": "Start Node 1 -> Operational",
+    },
+    "CANopen NMT Broadcast Start (All Nodes)": {
+        "id": "0x000",
+        "ext": False,
+        "rtr": False,
+        "data": "01 00",
+        "desc": "Start all bus nodes",
+    },
+    "CANopen NMT Pre-Op (Node 1)": {
+        "id": "0x000",
+        "ext": False,
+        "rtr": False,
+        "data": "80 01",
+        "desc": "Switch Node 1 to Pre-Operational",
+    },
+    "CANopen NMT Stop (Node 1)": {
+        "id": "0x000",
+        "ext": False,
+        "rtr": False,
+        "data": "02 01",
+        "desc": "Stop Node 1 communication",
+    },
+    "CANopen NMT Reset Node (Node 1)": {
+        "id": "0x000",
+        "ext": False,
+        "rtr": False,
+        "data": "81 01",
+        "desc": "Reset Node 1",
+    },
+    "CANopen SYNC Clock": {
+        "id": "0x080",
+        "ext": False,
+        "rtr": False,
+        "data": "",
+        "desc": "CiA 301 Synchronisation pulse",
+    },
+    "CiA 402 Drive - Ready to Switch On": {
+        "id": "0x201",
+        "ext": False,
+        "rtr": False,
+        "data": "06 00",
+        "desc": "RPDO1 Controlword 0x0006",
+    },
+    "CiA 402 Drive - Switch On": {
+        "id": "0x201",
+        "ext": False,
+        "rtr": False,
+        "data": "07 00",
+        "desc": "RPDO1 Controlword 0x0007",
+    },
+    "CiA 402 Drive - Enable Operation": {
+        "id": "0x201",
+        "ext": False,
+        "rtr": False,
+        "data": "0F 00",
+        "desc": "RPDO1 Controlword 0x000F",
+    },
+    "CiA 402 Drive - Target Velocity (1000 RPM)": {
+        "id": "0x301",
+        "ext": False,
+        "rtr": False,
+        "data": "0F 00 E8 03 00 00",
+        "desc": "RPDO2 Velocity 1000",
+    },
+    "SEVCON Gen4 - Throttle Request": {
+        "id": "0x270",
+        "ext": False,
+        "rtr": False,
+        "data": "03 04 00 00 00 64 00",
+        "desc": "RPDO1 Mode 3, Torque 100",
+    },
+    "J1939 - Address Claim Request": {
+        "id": "0x18EAFFFE",
+        "ext": True,
+        "rtr": False,
+        "data": "00 EE 00",
+        "desc": "Request Address Claimed PGN",
+    },
     "Raw CAN Ping": {"id": "0x123", "ext": False, "rtr": False, "data": "AA 55 01 02", "desc": "Arbitrary test frame"},
 }
 
@@ -90,6 +159,22 @@ class CanStudioApp(tk.Tk):
         self.title("CAN & CANopen Studio - Universal Protocol Analyzer & Transmit Station")
         self.geometry("1150x800")
         self.minsize(960, 680)
+
+        # Application Icon
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        ico_path = os.path.join(base_dir, "assets", "icon.ico")
+        png_path = os.path.join(base_dir, "assets", "icon.png")
+        if os.path.exists(ico_path):
+            try:
+                self.iconbitmap(ico_path)
+            except Exception:
+                pass
+        elif os.path.exists(png_path):
+            try:
+                icon_img = tk.PhotoImage(file=png_path)
+                self.iconphoto(True, icon_img)
+            except Exception:
+                pass
 
         # Bus & Layer State
         self.bus: Optional[can.Bus] = None
@@ -301,7 +386,9 @@ class CanStudioApp(tk.Tk):
         stat_frame = ttk.LabelFrame(self.tab_dash, text=" Bus Statistics ", padding=8)
         stat_frame.pack(fill=tk.X, pady=(0, 8))
 
-        self.lbl_rate = ttk.Label(stat_frame, text="Bus Rate: 0 msgs/s", font=("Segoe UI", 10, "bold"), foreground="#007acc")
+        self.lbl_rate = ttk.Label(
+            stat_frame, text="Bus Rate: 0 msgs/s", font=("Segoe UI", 10, "bold"), foreground="#007acc"
+        )
         self.lbl_rate.pack(side=tk.LEFT, padx=15)
 
         self.lbl_total_rx = ttk.Label(stat_frame, text="Total Received: 0", font=("Segoe UI", 10))
@@ -310,7 +397,9 @@ class CanStudioApp(tk.Tk):
         self.lbl_total_tx = ttk.Label(stat_frame, text="Total Transmitted: 0", font=("Segoe UI", 10))
         self.lbl_total_tx.pack(side=tk.LEFT, padx=15)
 
-        self.lbl_nodes_cnt = ttk.Label(stat_frame, text="Active Nodes: 0", font=("Segoe UI", 10, "bold"), foreground="green")
+        self.lbl_nodes_cnt = ttk.Label(
+            stat_frame, text="Active Nodes: 0", font=("Segoe UI", 10, "bold"), foreground="green"
+        )
         self.lbl_nodes_cnt.pack(side=tk.RIGHT, padx=15)
 
         # Split: Left = Discovered CANopen Nodes, Right = Telemetry Gauges
@@ -401,11 +490,20 @@ class CanStudioApp(tk.Tk):
             tb,
             values=[
                 "All Bytes (B0..B7)",
-                "Byte 0", "Byte 1", "Byte 2", "Byte 3",
-                "Byte 4", "Byte 5", "Byte 6", "Byte 7",
-                "Word 0..1 (int16 LE)", "Word 2..3 (int16 LE)",
-                "Word 4..5 (int16 LE)", "Word 6..7 (int16 LE)",
-                "DWord 0..3 (int32 LE)", "DWord 4..7 (int32 LE)",
+                "Byte 0",
+                "Byte 1",
+                "Byte 2",
+                "Byte 3",
+                "Byte 4",
+                "Byte 5",
+                "Byte 6",
+                "Byte 7",
+                "Word 0..1 (int16 LE)",
+                "Word 2..3 (int16 LE)",
+                "Word 4..5 (int16 LE)",
+                "Word 6..7 (int16 LE)",
+                "DWord 0..3 (int32 LE)",
+                "DWord 4..7 (int32 LE)",
             ],
             state="readonly",
             width=20,
@@ -450,13 +548,25 @@ class CanStudioApp(tk.Tk):
         cur = self.plot_target_combo.get().strip()
         if "Signal" in mode:
             signals_list = sorted(list(self.known_signals)) or [
-                "actual_speed_rpm", "velocity_actual", "target_torque", "heatsink_temp_c", "motor_temp_raw"
+                "actual_speed_rpm",
+                "velocity_actual",
+                "target_torque",
+                "heatsink_temp_c",
+                "motor_temp_raw",
             ]
             self.plot_target_combo["values"] = signals_list
             if not cur and signals_list:
                 self.plot_target_combo.set(signals_list[0])
         else:
-            ids_list = sorted(list(self.known_can_ids)) or ["0x473", "0x181", "0x281", "0x148", "0x156", "0x270", "0x701"]
+            ids_list = sorted(list(self.known_can_ids)) or [
+                "0x473",
+                "0x181",
+                "0x281",
+                "0x148",
+                "0x156",
+                "0x270",
+                "0x701",
+            ]
             self.plot_target_combo["values"] = ids_list
             if not cur and ids_list:
                 self.plot_target_combo.set(ids_list[0])
@@ -569,7 +679,9 @@ class CanStudioApp(tk.Tk):
         self.nmt_target_spin = ttk.Spinbox(r1, from_=0, to=127, width=4)
         self.nmt_target_spin.set("0")
         self.nmt_target_spin.pack(side=tk.LEFT, padx=3)
-        ttk.Label(r1, text="(0 = Broadcast to All Nodes)", font=("Segoe UI", 9, "italic"), foreground="#555555").pack(side=tk.LEFT, padx=4)
+        ttk.Label(r1, text="(0 = Broadcast to All Nodes)", font=("Segoe UI", 9, "italic"), foreground="#555555").pack(
+            side=tk.LEFT, padx=4
+        )
 
         btn_start = ttk.Button(r1, text="▶ Start Node (Operational)", command=lambda: self._send_nmt_from_ui(0x01))
         btn_start.pack(side=tk.LEFT, padx=6)
@@ -615,12 +727,19 @@ class CanStudioApp(tk.Tk):
         btn_load_tpl = ttk.Button(box_tpl, text="Load into Transmitter", command=self._load_template)
         btn_load_tpl.pack(side=tk.LEFT, padx=8)
 
-        self.lbl_tpl_desc = ttk.Label(box_tpl, text="Description: " + FRAME_TEMPLATES[list(FRAME_TEMPLATES.keys())[0]]["desc"], font=("Segoe UI", 9, "italic"), foreground="#007acc")
+        self.lbl_tpl_desc = ttk.Label(
+            box_tpl,
+            text="Description: " + FRAME_TEMPLATES[list(FRAME_TEMPLATES.keys())[0]]["desc"],
+            font=("Segoe UI", 9, "italic"),
+            foreground="#007acc",
+        )
         self.lbl_tpl_desc.pack(side=tk.LEFT, padx=10)
         self.template_combo.bind("<<ComboboxSelected>>", self._on_template_selected)
 
         # 3. Arbitrary Frame Transmitter
-        box_raw = ttk.LabelFrame(self.tab_tx, text=" Arbitrary Frame Transmitter (Standard 11-bit & Extended 29-bit) ", padding=12)
+        box_raw = ttk.LabelFrame(
+            self.tab_tx, text=" Arbitrary Frame Transmitter (Standard 11-bit & Extended 29-bit) ", padding=12
+        )
         box_raw.pack(fill=tk.BOTH, expand=True, pady=6)
 
         grid = ttk.Frame(box_raw)
@@ -754,7 +873,9 @@ class CanStudioApp(tk.Tk):
             msg = can.Message(arbitration_id=cid, is_extended_id=is_ext, is_remote_frame=is_rtr, data=data)
             self.bus.send(msg)
             self.stats["total_tx"] += 1
-            self.tx_status_lbl.configure(text=f"Frame 0x{cid:X} sent at {time.strftime('%H:%M:%S')}", foreground="green")
+            self.tx_status_lbl.configure(
+                text=f"Frame 0x{cid:X} sent at {time.strftime('%H:%M:%S')}", foreground="green"
+            )
         except Exception as e:
             self.tx_status_lbl.configure(text=f"Error: {e}", foreground="red")
             messagebox.showerror("Send Error", f"Failed to send frame:\n{e}")
@@ -784,7 +905,9 @@ class CanStudioApp(tk.Tk):
     # TAB 5: SDO Object Dictionary Reader & Writer
     # =========================================================================
     def _build_sdo_tab(self):
-        box_sdo = ttk.LabelFrame(self.tab_sdo, text=" Universal CANopen SDO Client (CiA 301 Expedited Protocol) ", padding=14)
+        box_sdo = ttk.LabelFrame(
+            self.tab_sdo, text=" Universal CANopen SDO Client (CiA 301 Expedited Protocol) ", padding=14
+        )
         box_sdo.pack(fill=tk.BOTH, expand=True)
 
         grid = ttk.Frame(box_sdo)
@@ -837,19 +960,33 @@ class CanStudioApp(tk.Tk):
         resp_box = ttk.LabelFrame(box_sdo, text=" SDO Transaction Result ", padding=10)
         resp_box.pack(fill=tk.X, pady=10)
 
-        self.sdo_resp_lbl = ttk.Label(resp_box, text="Ready. Click SDO Read or Write.", font=("Consolas", 11), foreground="#007acc")
+        self.sdo_resp_lbl = ttk.Label(
+            resp_box, text="Ready. Click SDO Read or Write.", font=("Consolas", 11), foreground="#007acc"
+        )
         self.sdo_resp_lbl.pack(fill=tk.X, pady=4)
 
         # Quick Inquiries
         quick_frame = ttk.LabelFrame(box_sdo, text=" Standard CiA 301 & CiA 402 Object Inquiries ", padding=10)
         quick_frame.pack(fill=tk.X, pady=8)
 
-        ttk.Button(quick_frame, text="0x1000:00 Device Type", command=lambda: self._quick_sdo(0x1000, 0)).pack(side=tk.LEFT, padx=3)
-        ttk.Button(quick_frame, text="0x1001:00 Error Register", command=lambda: self._quick_sdo(0x1001, 0)).pack(side=tk.LEFT, padx=3)
-        ttk.Button(quick_frame, text="0x1008:00 Device Name", command=lambda: self._quick_sdo(0x1008, 0)).pack(side=tk.LEFT, padx=3)
-        ttk.Button(quick_frame, text="0x1018:01 Vendor ID", command=lambda: self._quick_sdo(0x1018, 1)).pack(side=tk.LEFT, padx=3)
-        ttk.Button(quick_frame, text="0x6041:00 Statusword", command=lambda: self._quick_sdo(0x6041, 0)).pack(side=tk.LEFT, padx=3)
-        ttk.Button(quick_frame, text="0x606C:00 Actual Velocity", command=lambda: self._quick_sdo(0x606C, 0)).pack(side=tk.LEFT, padx=3)
+        ttk.Button(quick_frame, text="0x1000:00 Device Type", command=lambda: self._quick_sdo(0x1000, 0)).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(quick_frame, text="0x1001:00 Error Register", command=lambda: self._quick_sdo(0x1001, 0)).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(quick_frame, text="0x1008:00 Device Name", command=lambda: self._quick_sdo(0x1008, 0)).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(quick_frame, text="0x1018:01 Vendor ID", command=lambda: self._quick_sdo(0x1018, 1)).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(quick_frame, text="0x6041:00 Statusword", command=lambda: self._quick_sdo(0x6041, 0)).pack(
+            side=tk.LEFT, padx=3
+        )
+        ttk.Button(quick_frame, text="0x606C:00 Actual Velocity", command=lambda: self._quick_sdo(0x606C, 0)).pack(
+            side=tk.LEFT, padx=3
+        )
 
     def _quick_sdo(self, idx: int, sub: int):
         self.sdo_idx_entry.delete(0, tk.END)
@@ -871,7 +1008,9 @@ class CanStudioApp(tk.Tk):
 
             self.canopen_layer.send_sdo_read(node_id, idx, sub)
             self.stats["total_tx"] += 1
-            self.sdo_resp_lbl.configure(text=f"Waiting for SDO response from Node {node_id} (0x{0x580+node_id:03X})...", foreground="#007acc")
+            self.sdo_resp_lbl.configure(
+                text=f"Waiting for SDO response from Node {node_id} (0x{0x580 + node_id:03X})...", foreground="#007acc"
+            )
             self.after(200, lambda: self._check_sdo_reply(node_id, idx, sub))
         except Exception as e:
             messagebox.showerror("SDO Read Error", f"Invalid parameters:\n{e}")
@@ -900,7 +1039,9 @@ class CanStudioApp(tk.Tk):
 
             self.canopen_layer.send_sdo_write(node_id, idx, sub, data_bytes)
             self.stats["total_tx"] += 1
-            self.sdo_resp_lbl.configure(text=f"SDO Download sent to Node {node_id} [0x{idx:04X}:{sub:02X}] = {val_str}", foreground="green")
+            self.sdo_resp_lbl.configure(
+                text=f"SDO Download sent to Node {node_id} [0x{idx:04X}:{sub:02X}] = {val_str}", foreground="green"
+            )
         except Exception as e:
             messagebox.showerror("SDO Write Error", f"Invalid parameters:\n{e}")
 
@@ -910,7 +1051,11 @@ class CanStudioApp(tk.Tk):
             _, _, _, _, dhex, _, cid, _ = item
             if cid == expected_cid:
                 bytes_list = [int(b, 16) for b in dhex.split()]
-                if len(bytes_list) >= 4 and (bytes_list[1] | (bytes_list[2] << 8)) == req_idx and bytes_list[3] == req_sub:
+                if (
+                    len(bytes_list) >= 4
+                    and (bytes_list[1] | (bytes_list[2] << 8)) == req_idx
+                    and bytes_list[3] == req_sub
+                ):
                     cs = bytes_list[0]
                     if cs == 0x80:  # SDO Abort
                         err_code = int.from_bytes(bytes_list[4:8], "little")
@@ -926,11 +1071,13 @@ class CanStudioApp(tk.Tk):
                     ascii_str = bytes(payload).decode("latin-1", errors="ignore").replace("\x00", "")
                     self.sdo_resp_lbl.configure(
                         text=f"Reply from Node {req_node} [0x{req_idx:04X}:{req_sub:02X}] -> "
-                             f"Hex: 0x{raw_val:X} | Unsigned: {raw_val} | Signed: {signed_val} | ASCII: '{ascii_str}'",
+                        f"Hex: 0x{raw_val:X} | Unsigned: {raw_val} | Signed: {signed_val} | ASCII: '{ascii_str}'",
                         foreground="green",
                     )
                     return
-        self.sdo_resp_lbl.configure(text=f"SDO Timeout: No response from Node {req_node} within 200 ms.", foreground="#888888")
+        self.sdo_resp_lbl.configure(
+            text=f"SDO Timeout: No response from Node {req_node} within 200 ms.", foreground="#888888"
+        )
 
     # =========================================================================
     # TAB 6: Hardware & Bus Diagnostics
@@ -939,20 +1086,32 @@ class CanStudioApp(tk.Tk):
         box_hw = ttk.LabelFrame(self.tab_hw, text=" Hardware Adapter Information & SLCAN Commands ", padding=14)
         box_hw.pack(fill=tk.BOTH, expand=True)
 
-        self.lbl_hw_info = ttk.Label(box_hw, text="Adapter: Not Connected", font=("Consolas", 11, "bold"), foreground="#007acc")
+        self.lbl_hw_info = ttk.Label(
+            box_hw, text="Adapter: Not Connected", font=("Consolas", 11, "bold"), foreground="#007acc"
+        )
         self.lbl_hw_info.pack(fill=tk.X, pady=6)
 
-        slcan_box = ttk.LabelFrame(box_hw, text=" LAWICEL / SLCAN ASCII Hardware Commands (for CANUSB, USBtin, CANable) ", padding=10)
+        slcan_box = ttk.LabelFrame(
+            box_hw, text=" LAWICEL / SLCAN ASCII Hardware Commands (for CANUSB, USBtin, CANable) ", padding=10
+        )
         slcan_box.pack(fill=tk.X, pady=8)
 
         btn_row = ttk.Frame(slcan_box)
         btn_row.pack(fill=tk.X, pady=4)
 
-        ttk.Button(btn_row, text="Hardware Version (V)", command=lambda: self._send_slcan_cmd("V")).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_row, text="Serial Number (N)", command=lambda: self._send_slcan_cmd("N")).pack(side=tk.LEFT, padx=4)
-        ttk.Button(btn_row, text="Read Status Flags (F)", command=lambda: self._send_slcan_cmd("F")).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_row, text="Hardware Version (V)", command=lambda: self._send_slcan_cmd("V")).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(btn_row, text="Serial Number (N)", command=lambda: self._send_slcan_cmd("N")).pack(
+            side=tk.LEFT, padx=4
+        )
+        ttk.Button(btn_row, text="Read Status Flags (F)", command=lambda: self._send_slcan_cmd("F")).pack(
+            side=tk.LEFT, padx=4
+        )
 
-        self.slcan_resp_lbl = ttk.Label(slcan_box, text="SLCAN Response: -", font=("Consolas", 11), foreground="#555555")
+        self.slcan_resp_lbl = ttk.Label(
+            slcan_box, text="SLCAN Response: -", font=("Consolas", 11), foreground="#555555"
+        )
         self.slcan_resp_lbl.pack(fill=tk.X, pady=8)
 
         # Flags guide
@@ -980,7 +1139,9 @@ class CanStudioApp(tk.Tk):
             time.sleep(0.08)
             resp = ser.read(ser.in_waiting or 1)
             resp_str = resp.decode("ascii", errors="replace").replace("\r", " ").replace("\x07", "[BELL/ERR]").strip()
-            self.slcan_resp_lbl.configure(text=f"Command '{cmd_char}' -> Response: {resp_str if resp_str else '(OK/empty)'}", foreground="green")
+            self.slcan_resp_lbl.configure(
+                text=f"Command '{cmd_char}' -> Response: {resp_str if resp_str else '(OK/empty)'}", foreground="green"
+            )
         except Exception as e:
             self.slcan_resp_lbl.configure(text=f"Command Error: {e}", foreground="red")
 
@@ -1084,10 +1245,12 @@ class CanStudioApp(tk.Tk):
 
             self.running = True
             self.btn_connect.configure(text="Disconnect")
-            self.status_lbl.configure(text=f"Connected: {iface_key} [{channel}] @ {bitrate/1000:g} kbps", foreground="green")
+            self.status_lbl.configure(
+                text=f"Connected: {iface_key} [{channel}] @ {bitrate / 1000:g} kbps", foreground="green"
+            )
             self.lbl_hw_info.configure(
                 text=f"Active Interface: {SUPPORTED_INTERFACES[iface_key]['name']}\n"
-                     f"Channel: {channel} | Bitrate: {bitrate/1000:g} kbps | Backend: {iface_key}"
+                f"Channel: {channel} | Bitrate: {bitrate / 1000:g} kbps | Backend: {iface_key}"
             )
 
             self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
@@ -1197,7 +1360,9 @@ class CanStudioApp(tk.Tk):
                 # Extract telemetry signals
                 if "actual_speed_rpm" in parsed.signals:
                     self.telemetry_data["speed"] = parsed.signals["actual_speed_rpm"]
-                    self.telemetry_data["max_speed"] = parsed.signals.get("max_speed_rpm", self.telemetry_data["max_speed"])
+                    self.telemetry_data["max_speed"] = parsed.signals.get(
+                        "max_speed_rpm", self.telemetry_data["max_speed"]
+                    )
                 elif "velocity_actual" in parsed.signals:
                     self.telemetry_data["speed"] = parsed.signals["velocity_actual"]
 
@@ -1213,7 +1378,18 @@ class CanStudioApp(tk.Tk):
                 if not self.trace_paused:
                     type_str = "EXT" if msg.is_extended_id else "STD"
                     dhex = msg.data.hex(" ").upper() if msg.data else ""
-                    self.captured_messages.append((f"{elapsed:.3f}", type_str, cid_str, str(msg.dlc), dhex, parsed.decoded_info, cid, msg.is_extended_id))
+                    self.captured_messages.append(
+                        (
+                            f"{elapsed:.3f}",
+                            type_str,
+                            cid_str,
+                            str(msg.dlc),
+                            dhex,
+                            parsed.decoded_info,
+                            cid,
+                            msg.is_extended_id,
+                        )
+                    )
 
             except Exception:
                 break
@@ -1325,7 +1501,15 @@ class CanStudioApp(tk.Tk):
                 target_clean = target.strip()
                 cid = int(target_clean, 16 if not target_clean.lower().startswith("0x") else 0)
             except ValueError:
-                self.ax.text(0.5, 0.5, f"Invalid CAN ID: {target}", color="red", ha="center", va="center", transform=self.ax.transAxes)
+                self.ax.text(
+                    0.5,
+                    0.5,
+                    f"Invalid CAN ID: {target}",
+                    color="red",
+                    ha="center",
+                    va="center",
+                    transform=self.ax.transAxes,
+                )
                 self.plot_canvas.draw_idle()
                 return
 
@@ -1372,7 +1556,11 @@ class CanStudioApp(tk.Tk):
                     if x and y:
                         has_data = True
                         self.ax.plot(x, y, color="#32cd32", lw=2, label=f"{fmt}: {y[-1]}")
-                        self.ax.set_title(f"0x{cid:X}{dev_desc}\n{fmt} (Current: {y[-1]} | Min: {min(y)} | Max: {max(y)})", color="white", fontsize=10)
+                        self.ax.set_title(
+                            f"0x{cid:X}{dev_desc}\n{fmt} (Current: {y[-1]} | Min: {min(y)} | Max: {max(y)})",
+                            color="white",
+                            fontsize=10,
+                        )
                 self.ax.set_ylabel("Numerical Value", color="#cccccc")
 
             else:
@@ -1386,13 +1574,18 @@ class CanStudioApp(tk.Tk):
                     if x and y:
                         has_data = True
                         self.ax.plot(x, y, color=BYTE_COLORS[b_num], lw=2, label=f"Byte {b_num}: {y[-1]}")
-                        self.ax.set_title(f"0x{cid:X}{dev_desc}\nByte {b_num} (Current: {y[-1]} | Min: {min(y)} | Max: {max(y)})", color="white", fontsize=10)
+                        self.ax.set_title(
+                            f"0x{cid:X}{dev_desc}\nByte {b_num} (Current: {y[-1]} | Min: {min(y)} | Max: {max(y)})",
+                            color="white",
+                            fontsize=10,
+                        )
                 self.ax.set_ylim(-5, 260)
                 self.ax.set_ylabel("Byte Value (0 - 255)", color="#cccccc")
 
         if not has_data:
             self.ax.text(
-                0.5, 0.5,
+                0.5,
+                0.5,
                 f"No data received yet for '{target}'\n(Waiting for bus traffic in the last {window_sec:g}s...)",
                 color="#888888",
                 ha="center",
@@ -1405,7 +1598,9 @@ class CanStudioApp(tk.Tk):
         self.ax.set_xlabel("Time (seconds ago)", color="#cccccc")
         self.ax.tick_params(colors="#cccccc")
         if has_data:
-            leg = self.ax.legend(loc="upper left", facecolor="#1e1e1e", edgecolor="#555555", labelcolor="#dddddd", fontsize=8)
+            leg = self.ax.legend(
+                loc="upper left", facecolor="#1e1e1e", edgecolor="#555555", labelcolor="#dddddd", fontsize=8
+            )
             if leg:
                 leg.get_frame().set_alpha(0.8)
 
@@ -1439,8 +1634,12 @@ class CanStudioApp(tk.Tk):
         info_box.pack(fill=tk.X, pady=4)
 
         ttk.Label(info_box, text="Author: Sébastien Celles", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=2)
-        ttk.Label(info_box, text="License: GNU General Public License v3.0 (GPL-3.0-or-later)", font=("Segoe UI", 9)).pack(anchor="w", pady=2)
-        ttk.Label(info_box, text="Copyright © 2026 Sébastien Celles", font=("Segoe UI", 9, "italic"), foreground="#555555").pack(anchor="w", pady=2)
+        ttk.Label(
+            info_box, text="License: GNU General Public License v3.0 (GPL-3.0-or-later)", font=("Segoe UI", 9)
+        ).pack(anchor="w", pady=2)
+        ttk.Label(
+            info_box, text="Copyright © 2026 Sébastien Celles", font=("Segoe UI", 9, "italic"), foreground="#555555"
+        ).pack(anchor="w", pady=2)
 
         desc_text = (
             "General-purpose educational and engineering platform for learning, analyzing, "
@@ -1462,7 +1661,9 @@ class CanStudioApp(tk.Tk):
             "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. "
             "See the GNU General Public License for more details."
         )
-        ttk.Label(gpl_box, text=gpl_text, wraplength=460, font=("Segoe UI", 8), foreground="#444444").pack(fill=tk.BOTH, expand=True)
+        ttk.Label(gpl_box, text=gpl_text, wraplength=460, font=("Segoe UI", 8), foreground="#444444").pack(
+            fill=tk.BOTH, expand=True
+        )
 
         btn_row = ttk.Frame(f)
         btn_row.pack(fill=tk.X, pady=(10, 0))
@@ -1491,7 +1692,10 @@ class CanStudioApp(tk.Tk):
             with open(lic_path, "r", encoding="utf-8") as f:
                 txt.insert(tk.END, f.read())
         else:
-            txt.insert(tk.END, "GNU General Public License v3.0\n\nCopyright (C) 2026 Sébastien Celles\n\nSee: https://www.gnu.org/licenses/gpl-3.0.html")
+            txt.insert(
+                tk.END,
+                "GNU General Public License v3.0\n\nCopyright (C) 2026 Sébastien Celles\n\nSee: https://www.gnu.org/licenses/gpl-3.0.html",
+            )
         txt.configure(state=tk.DISABLED)
 
 

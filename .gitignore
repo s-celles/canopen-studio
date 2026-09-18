@@ -28,6 +28,23 @@
 !/docs/
 !/docs/**
 
+# 6. Whitelist unit tests
+!/tests/
+!/tests/**
+
+# 7. Whitelist packaging, scripts, icons, installer and metadata
+!/CHANGELOG.md
+!/install.bat
+!/scripts/
+!/scripts/**
+!/assets/
+!/assets/**
+!/installer/
+!/installer/**
+!/.github/
+!/.github/**
+
+
 # ==============================================================================
 # Explicitly re-ignore caches, virtual environments, and temporary data
 # ==============================================================================
@@ -42,3 +59,6 @@
 **/.ruff_cache/
 **/.DS_Store
 Thumbs.db
+build/
+dist/
+
