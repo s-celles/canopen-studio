@@ -1,6 +1,5 @@
 # Justfile for Universal CAN & CANopen Studio (Analyzer & Transmit Station)
 
-set shell := ["powershell.exe", "-NoProfile", "-Command"]
 
 # List all available recipes
 default:
@@ -75,10 +74,6 @@ listen-only:
 sample count="20":
     uv run python can_sniffer.py -c {{count}}
 
-# Clean temporary files, caches, build artifacts, and documentation site
-clean:
-    Get-ChildItem -Path . -Include __pycache__,*.csv,.pytest_cache,build,dist,site -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
 # Build static documentation site with MkDocs Material
 doc-build:
     uv run --with mkdocs-material mkdocs build --strict
@@ -87,9 +82,28 @@ doc-build:
 doc-serve:
     uv run --with mkdocs-material mkdocs serve
 
-# Run 1-click Windows installer (sets up environment and creates Desktop & Start Menu shortcuts)
+# Clean temporary files, caches, build artifacts, and documentation site
+clean:
+    #!/usr/bin/env python3
+    import shutil, glob, os
+    for p in ["build", "dist", "site"] + glob.glob("*.csv"):
+        if os.path.exists(p):
+            if os.path.isdir(p): shutil.rmtree(p)
+            else: os.remove(p)
+    for root, dirs, files in os.walk("."):
+        for d in dirs:
+            if d in ("__pycache__", ".pytest_cache"):
+                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+
+# Run OS-specific installer (sets up environment and creates application shortcuts)
 install:
-    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_windows.ps1
+    #!/usr/bin/env python3
+    import os, subprocess
+    if os.name == "nt":
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/install_windows.ps1"])
+    else:
+        subprocess.run(["bash", "install.sh"])
+
 
 # Generate application icon assets (.ico and .png)
 generate-icon:
@@ -102,4 +116,3 @@ build-exe:
 # Build single-file portable Windows executable (.exe)
 build-portable:
     uv run --with pyinstaller python scripts/build_exe.py --clean --onefile
-
