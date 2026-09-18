@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-09-18
+## [0.4.0] - 2026-09-19
+
+### Security
+- The A2A server no longer starts automatically. It is stateless and accepts `text/plain`, so a single POST from any web page the user visited reached it without a CORS preflight and could transmit on a connected CAN bus (`send`, `sync`, `nmt stop` were all confirmed to execute). It now requires `CANOPEN_STUDIO_A2A=1`.
+- Both servers refuse requests carrying an `Origin` header, which blocks browser-originated requests while leaving command-line clients and MCP agents unaffected. `CANOPEN_STUDIO_ALLOWED_ORIGINS` allows specific origins when a front-end genuinely needs one.
+- Both servers refuse requests whose `Host` header does not name the loopback interface, closing the DNS rebinding variant where the page becomes same-origin and sends no `Origin`.
+- The MCP server can be kept from starting with `CANOPEN_STUDIO_MCP=0`, for shared machines.
+- Documented the real exposure of each server, why their defaults differ, and what remains uncovered (no authentication: any local process can still reach a running server).
+
+### Fixed
+- Worked around fastmcp 4.0.5 silently ignoring `host_origin_protection` on the SSE transport, which left the protection absent while appearing enabled; the MCP server now mounts the project's own guard. See `upstream-bugs.md`.
+
+## [0.3.0] - 2026-09-18 [WITHDRAWN]
+
+Withdrawn on 2026-09-19: this release shipped the A2A exposure described above. Its content is
+included in 0.4.0.
+
 
 ### Added
 - CAN <-> network bridge (`can_bridge.py`): mirrors the bus currently captured — typically a physical adapter connected to a real device — onto a UDP multicast group, so remote machines observe the live traffic as if they were wired to it. Available from the GUI toolbar (**Bridge → Net**) and from the MCP/A2A `bridge_start` / `bridge_stop` tools, with bridge counters reported by `get_status`.

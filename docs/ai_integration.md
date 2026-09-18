@@ -1,8 +1,15 @@
 # AI Integration (MCP & A2A)
 
-CAN & CANopen Studio exposes its bus to AI agents through two protocol servers. Both start
-automatically in daemon threads when the GUI launches — there is nothing to configure to get
-them running.
+CAN & CANopen Studio exposes its bus to AI agents through two protocol servers.
+
+**MCP starts with the GUI. A2A does not** — it is opt-in, for the reasons in
+[Why A2A is opt-in](#why-a2a-is-opt-in).
+
+```bash
+uv run canopen-studio                          # MCP only
+CANOPEN_STUDIO_A2A=1 uv run canopen-studio     # MCP + A2A
+CANOPEN_STUDIO_MCP=0 uv run canopen-studio     # neither
+```
 
 ```
 MCP server: http://localhost:3001/sse
@@ -130,6 +137,9 @@ Each instance needs its own ports. Three environment variables cover it:
 | `CANOPEN_STUDIO_INSTANCE` | *(empty)* | Name shown in the window title and reported in `get_status()` |
 | `MCP_PORT` | `3001` | MCP SSE port |
 | `A2A_PORT` | `8765` | A2A HTTP port |
+| `CANOPEN_STUDIO_MCP` | on | Set to `0` to keep the MCP server from starting |
+| `CANOPEN_STUDIO_A2A` | off | Set to `1` to start the A2A server |
+| `CANOPEN_STUDIO_ALLOWED_ORIGINS` | *(empty)* | Comma-separated `Origin` values to accept |
 
 ```bash
 # Gateway: holds the CAN adapter and mirrors it onto the network
@@ -149,10 +159,48 @@ claude mcp add --transport sse canopen-receiver http://localhost:3002/sse
 
 ## Security
 
-Both servers bind to `localhost` and have **no authentication**. They are reachable only from the
-machine running the application, which is deliberate: the tools transmit on a CAN bus, and on real
-hardware that commands equipment.
+These servers transmit on a CAN bus. A request reaching one of them can command real equipment,
+so binding to `localhost` is necessary but not sufficient.
 
-Exposing them on a network interface — through a reverse proxy or an SSH tunnel — hands bus
-control to whoever reaches the port. Put authentication in front of them if you do, and keep in
-mind that the bridge's injection path has the same reach.
+### The web page problem
+
+Listening on loopback keeps other machines out. It does not keep a *web page* out: any site the
+user visits can POST to `http://localhost:...` from their browser. The attacker cannot read the
+reply — the browser blocks that — but the side effect has already happened.
+
+Both servers guard against this with two header checks:
+
+- **Origin** — a browser always attaches it to a cross-origin POST and a page cannot forge it,
+  while command-line clients and MCP agents send none. Any request carrying an `Origin` is
+  refused with 403. Set `CANOPEN_STUDIO_ALLOWED_ORIGINS` to a comma-separated list if you have a
+  front-end that genuinely needs one.
+- **Host** — a DNS rebinding attack points an attacker-controlled name at `127.0.0.1`, after
+  which the page is same-origin and may send no `Origin` at all. The `Host` header still names
+  the attacker's domain, so a non-loopback `Host` is refused.
+
+### Why A2A is opt-in
+
+The two servers are not equally exposed, which is why they have different defaults.
+
+| | MCP | A2A |
+|---|---|---|
+| Accepts `text/plain` | no | yes |
+| CORS preflight required | yes | no |
+| Session required | yes, a 128-bit id read from the SSE stream | none |
+| Reachable from a web page | no | **yes, before the guard** |
+
+MCP has two independent barriers of its own: it rejects anything but `application/json`, which
+forces a preflight the browser cannot complete, and it needs a session id that only the SSE
+stream hands out — a stream a cross-origin page cannot read. A2A has neither: it is stateless
+and accepts a simple request, so a single POST from any page reached the bus.
+
+That gap is why A2A stays off unless you ask for it, while MCP starts with the application.
+
+### What is still not covered
+
+There is no authentication. Any process running as any user on this machine can reach either
+server while it is up — the header checks stop browsers, not local programs. On a shared machine,
+run with `CANOPEN_STUDIO_MCP=0` when you are not using an agent.
+
+Exposing either server beyond loopback — a reverse proxy, an SSH tunnel — hands bus control to
+whoever reaches the port, and the bridge's injection path has the same reach.

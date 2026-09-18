@@ -254,12 +254,19 @@ class CanStudioApp(tk.Tk):
 
         # Start MCP and A2A servers in background daemon threads
         if _SERVERS_AVAILABLE:
-            _mcp.set_app(self)
-            _a2a.set_app(self)
-            _mcp.start_in_thread()
-            _a2a.start_in_thread()
-            print(f"MCP server: http://localhost:{_mcp.MCP_PORT}/sse")
-            print(f"A2A server: http://localhost:{_a2a.A2A_PORT}/.well-known/agent.json")
+            if _mcp.is_enabled():
+                _mcp.set_app(self)
+                _mcp.start_in_thread()
+                print(f"MCP server: http://localhost:{_mcp.MCP_PORT}/sse")
+            else:
+                print("MCP server: disabled (CANOPEN_STUDIO_MCP=0)")
+            # A2A is opt-in: a web page can POST to it without a CORS preflight.
+            if _a2a.is_enabled():
+                _a2a.set_app(self)
+                _a2a.start_in_thread()
+                print(f"A2A server: http://localhost:{_a2a.A2A_PORT}/.well-known/agent.json")
+            else:
+                print("A2A server: disabled (set CANOPEN_STUDIO_A2A=1 to enable)")
 
         # Non-blocking background update check
         threading.Thread(target=self._background_update_check, daemon=True).start()

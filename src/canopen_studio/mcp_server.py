@@ -18,8 +18,10 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 import can
+import uvicorn
 from fastmcp import FastMCP
 
+from canopen_studio import agent_security as _sec
 from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
 from canopen_studio.stack import CANopenLayer, get_default_registry
 
@@ -30,6 +32,12 @@ import os as _os
 
 MCP_HOST = "localhost"
 MCP_PORT = int(_os.environ.get("MCP_PORT", 3001))
+
+
+def is_enabled() -> bool:
+    """Whether the MCP server may start. On unless CANOPEN_STUDIO_MCP disables it."""
+    return _sec.env_flag("CANOPEN_STUDIO_MCP", default=True)
+
 
 mcp = FastMCP(
     "CANopen Studio",
@@ -364,13 +372,27 @@ def sdo_read(node_id: int, index: int, subindex: int = 0) -> str:
 # ---------------------------------------------------------------------------
 
 
+def build_app():
+    """
+    Build the guarded SSE application.
+
+    fastmcp 4.0.5 accepts host_origin_protection but silently drops it on the SSE transport
+    (see upstream-bugs.md), so the project mounts its own guard rather than trusting a
+    setting that does nothing. Without it a web page the user visits can reach these tools,
+    and they transmit on a CAN bus.
+    """
+    app = mcp.http_app(transport="sse")
+    app.add_middleware(_sec.LocalOnlyMiddleware)
+    return app
+
+
 def start_in_thread(host: str = MCP_HOST, port: int = MCP_PORT) -> threading.Thread:
     """Start the MCP SSE server in a daemon thread (used by canopen_studio.gui)."""
 
     def _run() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        mcp.run(transport="sse", host=host, port=port, log_level="warning")
+        uvicorn.run(build_app(), host=host, port=port, log_level="warning", loop="asyncio")
 
     t = threading.Thread(target=_run, daemon=True, name=f"mcp-server-{port}")
     t.start()
@@ -381,7 +403,7 @@ def main() -> None:
     """Standalone entry point: uv run canopen-mcp"""
     print(f"CANopen Studio MCP server starting on http://{MCP_HOST}:{MCP_PORT}")
     print(f"Claude Code: claude mcp add --transport sse canopen-studio http://{MCP_HOST}:{MCP_PORT}/sse")
-    mcp.run(transport="sse", host=MCP_HOST, port=MCP_PORT)
+    uvicorn.run(build_app(), host=MCP_HOST, port=MCP_PORT)
 
 
 if __name__ == "__main__":

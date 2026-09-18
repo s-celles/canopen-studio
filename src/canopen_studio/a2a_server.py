@@ -26,6 +26,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from canopen_studio import __version__
+from canopen_studio import agent_security as _sec
 from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
 from canopen_studio.stack import CANopenLayer, get_default_registry
 
@@ -35,6 +36,18 @@ if TYPE_CHECKING:
 import os as _os
 
 A2A_HOST = "localhost"
+
+
+def is_enabled() -> bool:
+    """
+    Whether the A2A server may start. Off unless CANOPEN_STUDIO_A2A is set.
+
+    Unlike MCP, this endpoint is stateless and accepts text/plain, so a POST from any web
+    page reaches it without a CORS preflight. It stays off until explicitly asked for.
+    """
+    return _sec.env_flag("CANOPEN_STUDIO_A2A", default=False)
+
+
 A2A_PORT = int(_os.environ.get("A2A_PORT", 8765))
 
 # ---------------------------------------------------------------------------
@@ -290,6 +303,9 @@ def _standalone_disconnect() -> str:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="CANopen Studio A2A Agent", docs_url=None, redoc_url=None)
+
+# Refuse browser-originated and rebound requests before they can touch the bus.
+app.add_middleware(_sec.LocalOnlyMiddleware)
 
 AGENT_CARD = {
     "name": "CANopen Studio",
