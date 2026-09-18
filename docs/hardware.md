@@ -54,6 +54,34 @@ It is common to wonder if injecting raw CAN bus traffic over an IP network will 
 - **Negligible Bandwidth:** A physical CAN bus loaded at 100% (500 kbit/s) generates less than 100 KB/s of network traffic. On a standard 1 Gigabit office network, this represents less than 0.1% of the available bandwidth.
 - **Local Scope:** Multicast packets remain strictly on your local subnet (LAN). They are not routed out to the external internet.
 
+### Reaching Machines on Another Subnet (Hop Limit)
+Frames are carried as UDP datagrams on port **43113** with an IP hop limit (TTL) of **1** by default.
+A hop limit of 1 means routers never forward the traffic: every participating machine must sit on the
+**same network segment**. This is the safe default — it guarantees the bus cannot leak beyond your LAN.
+
+To span several subnets, raise the hop limit to the number of routers the frames must cross:
+
+Set the `CANOPEN_UDP_HOP_LIMIT` environment variable before launching the application:
+
+```bash
+# Allow the virtual bus to cross up to 4 routers
+CANOPEN_UDP_HOP_LIMIT=4 uv run python can_gui.py
+```
+
+Or pass it per connection through the MCP / A2A `connect` tool, which overrides the variable:
+
+```python
+connect(interface="udp_multicast", channel="239.0.0.1", hop_limit=4)
+```
+
+Every machine must use the **same multicast address**; the hop limit only needs raising on the
+*sending* side, but setting it everywhere keeps bidirectional traffic symmetric.
+
+!!! warning "Routers must forward multicast"
+    Raising the hop limit is necessary but not always sufficient: the intervening routers also need
+    multicast routing (PIM) or an IGMP proxy enabled. On a plain office LAN without multicast routing,
+    keep all machines on one segment.
+
 ### Simulating a CANopen Node
 CANopen Studio includes a built-in virtual node that generates telemetry (Heartbeats, SYNC pulses, CiA 402/SEVCON PDOs, and SDO responses).
 - **In the GUI**: Simply check the **"Simulate"** checkbox next to the Channel selector before clicking Connect. This will inject the simulated traffic directly onto the active bus (whether it's a physical USB interface, SocketCAN, or a UDP Multicast IP).

@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Configurable UDP multicast hop limit (TTL) via the `CANOPEN_UDP_HOP_LIMIT` environment variable or the `hop_limit` argument of `open_can_bus()` and the MCP/A2A `connect` tool, allowing the virtual CAN bus to reach machines on other subnets (python-can defaults to 1, confining frames to the local segment).
+- MCP/A2A status now reports the active `channel` and `bitrate` alongside the interface, so remote clients can join the same bus.
+- Unit tests for the MCP server tools (`tests/test_mcp_server.py`), the GUI status snapshot (`tests/test_gui_status.py`) and the UDP multicast bus configuration.
+
 ### Fixed
 - Corrected the `claude mcp add` command shown in `can_mcp_server.py` (docstring and standalone startup message): the server name must precede the URL.
+- `get_status` reported the interface selected in the combobox instead of the one actually connected, so a bus opened from MCP/A2A was misreported (e.g. `slcan` while running on `udp_multicast`).
+- Frames sent through MCP/A2A (`send_frame`, `send_nmt`, `send_sync`, `sdo_read`) were not counted in the `total_tx` statistic, unlike frames sent from the GUI transmission console.
+- Removed an unused `tkinter` import in `connect_from_mcp` flagged by Ruff (F401).
+
+### Changed
+- Applied `ruff format` to `can_gui.py`, `can_mcp_server.py` and `can_a2a_server.py`, which were failing the CI formatting check.
 
 ## [0.2.1] - 2026-09-18
 

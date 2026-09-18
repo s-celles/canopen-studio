@@ -35,6 +35,7 @@ from typing import Optional, Dict, Any
 try:
     import can_mcp_server as _mcp
     import can_a2a_server as _a2a
+
     _SERVERS_AVAILABLE = True
 except ImportError:
     _SERVERS_AVAILABLE = False
@@ -204,6 +205,12 @@ class CanStudioApp(tk.Tk):
         self.simulator: Optional[VirtualCanopenSimulator] = None
         self.running = False
         self.rx_thread: Optional[threading.Thread] = None
+
+        # Connection actually in use — may differ from the combobox selection when
+        # the connection was opened from MCP/A2A rather than from the GUI.
+        self.active_interface: str = ""
+        self.active_channel: str = ""
+        self.active_bitrate: int = 0
 
         # Periodic Transmission Timers
         self.tx_periodic_timer = None
@@ -1276,14 +1283,22 @@ class CanStudioApp(tk.Tk):
     # =========================================================================
 
     def get_status_dict(self) -> Dict[str, Any]:
-        iface_key = self._get_selected_iface_key() if hasattr(self, "_get_selected_iface_key") else "unknown"
+        connected = self.bus is not None
+        if connected and self.active_interface:
+            iface_key = self.active_interface
+        elif hasattr(self, "_get_selected_iface_key"):
+            iface_key = self._get_selected_iface_key()
+        else:
+            iface_key = "unknown"
         return {
             "instance": self.instance_name or "default",
-            "connected": self.bus is not None,
+            "connected": connected,
             "interface": iface_key,
+            "channel": self.active_channel,
+            "bitrate": self.active_bitrate,
             "simulate": self.simulator is not None,
             "stats": dict(self.stats),
-            "message": "Connected" if self.bus else "Not connected — call connect() first",
+            "message": "Connected" if connected else "Not connected — call connect() first",
         }
 
     def get_trace_json(self, n: int = 50) -> list:
@@ -1307,31 +1322,42 @@ class CanStudioApp(tk.Tk):
             "stats": dict(self.stats),
         }
 
-    def connect_from_mcp(self, interface: str, channel: str, bitrate: int, simulate: bool) -> str:
+    def connect_from_mcp(
+        self,
+        interface: str,
+        channel: str,
+        bitrate: int,
+        simulate: bool,
+        hop_limit: Optional[int] = None,
+    ) -> str:
         """Connect to a CAN bus from MCP/A2A (runs in a background thread)."""
-        import tkinter as _tk
         if self.bus:
             return "Already connected. Disconnect first."
         try:
             from can_interfaces import open_can_bus as _open, VirtualCanopenSimulator as _Sim
             from canopen_stack import CANopenLayer as _Layer, get_default_registry as _reg
-            self.bus = _open(interface, channel, bitrate)
+
+            self.bus = _open(interface, channel, bitrate, hop_limit=hop_limit)
             if simulate:
-                self.sim_bus = _open(interface, channel, bitrate)
+                self.sim_bus = _open(interface, channel, bitrate, hop_limit=hop_limit)
                 self.simulator = _Sim(self.sim_bus)
                 self.simulator.start()
             self.canopen_layer = _Layer(bus=self.bus, registry=_reg())
+            self.active_interface, self.active_channel, self.active_bitrate = interface, channel, bitrate
             self.running = True
             self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
             self.rx_thread.start()
             # Update GUI on the main thread (status bar + refresh loop)
-            self.after(0, lambda: (
-                self.status_lbl.configure(
-                    text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
+            self.after(
+                0,
+                lambda: (
+                    self.status_lbl.configure(
+                        text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
+                    ),
+                    self.btn_connect.configure(text="Disconnect"),
+                    self._update_gui_loop(),
                 ),
-                self.btn_connect.configure(text="Disconnect"),
-                self._update_gui_loop(),
-            ))
+            )
             return f"Connected to {interface} [{channel}]" + (" + simulator" if simulate else "")
         except Exception as exc:
             return f"Connection failed: {exc}"
@@ -1385,6 +1411,7 @@ class CanStudioApp(tk.Tk):
             reg = get_default_registry()
             reg.active_profile = self.profile_combo.get()
             self.canopen_layer = CANopenLayer(bus=self.bus, registry=reg)
+            self.active_interface, self.active_channel, self.active_bitrate = iface_key, channel, bitrate
 
             self.running = True
             self.btn_connect.configure(text="Disconnect")
@@ -1439,6 +1466,7 @@ class CanStudioApp(tk.Tk):
             self.bus = None
 
         self.canopen_layer = None
+        self.active_interface, self.active_channel, self.active_bitrate = "", "", 0
         self.btn_connect.configure(text="Connect")
         self.status_lbl.configure(text="Status: Disconnected", foreground="red")
         self.lbl_hw_info.configure(text="Adapter: Not Connected")

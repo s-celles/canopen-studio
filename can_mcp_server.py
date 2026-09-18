@@ -49,6 +49,7 @@ _standalone_sim_bus: can.Bus | None = None
 _standalone_simulator: VirtualCanopenSimulator | None = None
 _standalone_layer: CANopenLayer | None = None
 _standalone_trace: list[dict] = []
+_standalone_tx_count = 0
 _standalone_running = False
 _standalone_rx_thread: threading.Thread | None = None
 
@@ -81,6 +82,15 @@ def _get_trace(n: int) -> list[dict]:
     if _app_ref is not None:
         return _app_ref.get_trace_json(n)
     return _standalone_trace[-n:]
+
+
+def _count_tx() -> None:
+    """Count a transmitted frame so MCP sends show up in the same statistics as GUI sends."""
+    global _standalone_tx_count
+    if _app_ref is not None:
+        _app_ref.stats["total_tx"] += 1
+    else:
+        _standalone_tx_count += 1
 
 
 def _get_network() -> dict:
@@ -128,6 +138,7 @@ def get_status() -> dict:
     return {
         "connected": connected,
         "mode": "standalone",
+        "stats": {"total_tx": _standalone_tx_count},
         "message": "Connected (standalone MCP server)" if connected else "Not connected — call connect() first",
     }
 
@@ -138,6 +149,7 @@ def connect(
     channel: str = "239.0.0.1",
     bitrate: int = 0,
     simulate: bool = False,
+    hop_limit: int | None = None,
 ) -> str:
     """Connect to a CAN bus.
 
@@ -146,9 +158,11 @@ def connect(
         channel: Channel string (IP for udp_multicast, interface name for socketcan, port for slcan).
         bitrate: Bus bitrate in bps (0 for udp_multicast / virtual).
         simulate: Start the virtual CANopen simulator (nodes, SYNC, PDOs, heartbeats).
+        hop_limit: udp_multicast only — IP hop limit (TTL). 1 (the default) keeps frames on
+            the local network segment; raise it to reach machines on other subnets.
     """
     if _app_ref is not None:
-        return _app_ref.connect_from_mcp(interface, channel, bitrate, simulate)
+        return _app_ref.connect_from_mcp(interface, channel, bitrate, simulate, hop_limit=hop_limit)
 
     global _standalone_bus, _standalone_sim_bus, _standalone_simulator
     global _standalone_layer, _standalone_running, _standalone_rx_thread
@@ -157,12 +171,12 @@ def connect(
         return "Already connected. Call disconnect() first."
 
     try:
-        _standalone_bus = open_can_bus(interface, channel, bitrate)
+        _standalone_bus = open_can_bus(interface, channel, bitrate, hop_limit=hop_limit)
         reg = get_default_registry()
         _standalone_layer = CANopenLayer(bus=_standalone_bus, registry=reg)
 
         if simulate:
-            _standalone_sim_bus = open_can_bus(interface, channel, bitrate)
+            _standalone_sim_bus = open_can_bus(interface, channel, bitrate, hop_limit=hop_limit)
             _standalone_simulator = VirtualCanopenSimulator(_standalone_sim_bus)
             _standalone_simulator.start()
 
@@ -182,7 +196,7 @@ def disconnect() -> str:
         return _app_ref.disconnect_from_mcp()
 
     global _standalone_bus, _standalone_sim_bus, _standalone_simulator
-    global _standalone_layer, _standalone_running
+    global _standalone_layer, _standalone_running, _standalone_tx_count
 
     if not _standalone_bus:
         return "Not connected."
@@ -204,6 +218,7 @@ def disconnect() -> str:
     _standalone_bus = None
     _standalone_layer = None
     _standalone_trace.clear()
+    _standalone_tx_count = 0
     return "Disconnected."
 
 
@@ -233,6 +248,7 @@ def send_frame(can_id: int, data: list[int], extended: bool = False) -> str:
     try:
         msg = can.Message(arbitration_id=can_id, data=bytes(data), is_extended_id=extended)
         bus.send(msg)
+        _count_tx()
         return f"Sent 0x{can_id:03X} [{' '.join(f'{b:02X}' for b in data)}]"
     except Exception as exc:
         return f"Send failed: {exc}"
@@ -262,6 +278,7 @@ def send_nmt(command: str, node_id: int = 0) -> str:
     try:
         msg = can.Message(arbitration_id=0x000, is_extended_id=False, data=[cmd_byte, node_id])
         bus.send(msg)
+        _count_tx()
         target = f"node {node_id}" if node_id else "all nodes"
         return f"NMT {command} sent to {target}"
     except Exception as exc:
@@ -276,6 +293,7 @@ def send_sync() -> str:
         return "Not connected — call connect() first."
     try:
         bus.send(can.Message(arbitration_id=0x080, is_extended_id=False, data=[]))
+        _count_tx()
         return "SYNC sent (0x080)"
     except Exception as exc:
         return f"Send failed: {exc}"
@@ -303,6 +321,7 @@ def sdo_read(node_id: int, index: int, subindex: int = 0) -> str:
         return "Not connected — call connect() first."
     try:
         layer.send_sdo_read(node_id, index, subindex)
+        _count_tx()
         return f"SDO read sent to node {node_id} — 0x{index:04X}:{subindex:02X}. Check get_trace() for response."
     except Exception as exc:
         return f"Send failed: {exc}"

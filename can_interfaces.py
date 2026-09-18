@@ -7,11 +7,16 @@ License: GNU General Public License v3.0 (GPL-3.0-or-later)
 Copyright (C) 2026 Sébastien Celles
 """
 
+import os
 import time
 import threading
 from typing import Dict, List, Optional, Any
 import serial.tools.list_ports
 import can
+
+# python-can sends UDP multicast with a hop limit of 1, which keeps frames on the local
+# network segment. A higher value lets them cross routers to reach other subnets.
+DEFAULT_UDP_HOP_LIMIT = 1
 
 # Market CAN Converters catalog
 SUPPORTED_INTERFACES = {
@@ -124,9 +129,35 @@ def find_canusb_port() -> Optional[str]:
     return None
 
 
-def open_can_bus(interface_key: str, channel: str, bitrate: int) -> can.Bus:
+def resolve_udp_hop_limit(hop_limit: Optional[int] = None) -> int:
+    """
+    Resolve the UDP multicast hop limit: explicit argument, else environment, else default.
+
+    A hop limit of 1 confines frames to the local segment; raise it to reach other subnets.
+    """
+    if hop_limit is not None:
+        return int(hop_limit)
+    try:
+        return int(os.environ.get("CANOPEN_UDP_HOP_LIMIT", DEFAULT_UDP_HOP_LIMIT))
+    except ValueError:
+        return DEFAULT_UDP_HOP_LIMIT
+
+
+def open_can_bus(
+    interface_key: str,
+    channel: str,
+    bitrate: int,
+    hop_limit: Optional[int] = None,
+) -> can.Bus:
     """
     Instantiate a python-can Bus object for any selected market interface.
+
+    Args:
+        interface_key: Key of the interface in SUPPORTED_INTERFACES.
+        channel: Channel string (serial port, IP multicast group, kernel interface...).
+        bitrate: Bus bitrate in bps (ignored by the virtual backend).
+        hop_limit: UDP multicast hop limit (TTL). Ignored by every other backend.
+            Defaults to the CANOPEN_UDP_HOP_LIMIT environment variable, else 1.
     """
     cfg = SUPPORTED_INTERFACES.get(interface_key, SUPPORTED_INTERFACES["slcan"])
     backend = cfg["backend"]
@@ -149,6 +180,9 @@ def open_can_bus(interface_key: str, channel: str, bitrate: int) -> can.Bus:
 
     if backend == "vector":
         kwargs["app_name"] = "CANopenStudio"
+
+    if backend == "udp_multicast":
+        kwargs["hop_limit"] = resolve_udp_hop_limit(hop_limit)
 
     return can.Bus(**kwargs)
 
