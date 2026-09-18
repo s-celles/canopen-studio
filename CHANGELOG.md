@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- CAN <-> network bridge (`can_bridge.py`): mirrors the bus currently captured — typically a physical adapter connected to a real device — onto a UDP multicast group, so remote machines observe the live traffic as if they were wired to it. Available from the GUI toolbar (**Bridge → Net**) and from the MCP/A2A `bridge_start` / `bridge_stop` tools, with bridge counters reported by `get_status`.
+- Optional injection direction (`allow_inject`) replaying network frames onto the real bus, off by default because it writes to real hardware.
+- Symmetric loop protection in the bridge: frames sent in either direction are remembered for a short window so the multicast reflection is discarded instead of being relayed back; the bridge also refuses to mirror a multicast group onto itself.
 - Configurable UDP multicast hop limit (TTL) via the `CANOPEN_UDP_HOP_LIMIT` environment variable or the `hop_limit` argument of `open_can_bus()` and the MCP/A2A `connect` tool, allowing the virtual CAN bus to reach machines on other subnets (python-can defaults to 1, confining frames to the local segment).
 - MCP/A2A status now reports the active `channel` and `bitrate` alongside the interface, so remote clients can join the same bus.
 - Unit tests for the MCP server tools (`tests/test_mcp_server.py`), the GUI status snapshot (`tests/test_gui_status.py`) and the UDP multicast bus configuration.

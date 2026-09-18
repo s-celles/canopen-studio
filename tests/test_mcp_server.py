@@ -112,3 +112,34 @@ class TestConnectForwardsHopLimit:
 class TestStatusDelegation:
     def test_status_comes_from_the_app_when_integrated(self, app):
         assert _call(mcp_server.get_status)["interface"] == "udp_multicast"
+
+
+class TestBridgeTools:
+    """Bridging is exposed to MCP clients so a real bus can be shared on demand."""
+
+    def test_bridge_start_delegates_to_the_app(self, app):
+        captured = {}
+        app.start_bridge = lambda channel, **kw: captured.update(kw, channel=channel) or "Bridging"
+
+        _call(mcp_server.bridge_start, channel="239.0.0.5", hop_limit=4, allow_inject=True)
+
+        assert captured == {"channel": "239.0.0.5", "hop_limit": 4, "allow_inject": True}
+
+    def test_bridge_start_defaults_to_read_only(self, app):
+        captured = {}
+        app.start_bridge = lambda channel, **kw: captured.update(kw) or "Bridging"
+
+        _call(mcp_server.bridge_start)
+
+        assert captured["allow_inject"] is False
+
+    def test_bridge_stop_delegates_to_the_app(self, app):
+        app.stop_bridge = lambda: "Bridge stopped."
+
+        assert _call(mcp_server.bridge_stop) == "Bridge stopped."
+
+    def test_bridging_needs_the_gui(self, monkeypatch):
+        """Standalone mode has no capture loop to feed the bridge."""
+        monkeypatch.setattr(mcp_server, "_app_ref", None)
+
+        assert "gui" in _call(mcp_server.bridge_start).lower()

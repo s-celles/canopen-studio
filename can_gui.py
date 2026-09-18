@@ -43,6 +43,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 import can
+from can_bridge import CanBridge
 from updater import (
     CURRENT_VERSION,
     GITHUB_REPO,
@@ -203,6 +204,7 @@ class CanStudioApp(tk.Tk):
         self.sim_bus: Optional[can.Bus] = None  # separate tx bus for simulator on network interfaces
         self.canopen_layer: Optional[CANopenLayer] = None
         self.simulator: Optional[VirtualCanopenSimulator] = None
+        self.bridge: Optional[CanBridge] = None  # mirrors the captured bus onto the network
         self.running = False
         self.rx_thread: Optional[threading.Thread] = None
 
@@ -332,6 +334,17 @@ class CanStudioApp(tk.Tk):
         self.profile_combo.set("All / Auto")
         self.profile_combo.pack(side=tk.LEFT, padx=3)
         self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_changed)
+
+        self.bridge_var = tk.BooleanVar(value=False)
+        self.chk_bridge = ttk.Checkbutton(top_bar, text="Bridge → Net:", variable=self.bridge_var)
+        self.chk_bridge.pack(side=tk.LEFT, padx=(8, 0))
+        self.bridge_channel_combo = ttk.Combobox(
+            top_bar,
+            values=SUPPORTED_INTERFACES["udp_multicast"]["default_channels"],
+            width=12,
+        )
+        self.bridge_channel_combo.set("239.0.0.1")
+        self.bridge_channel_combo.pack(side=tk.LEFT, padx=3)
 
         self.btn_connect = ttk.Button(top_bar, text="Connect", command=self._toggle_connection)
         self.btn_connect.pack(side=tk.LEFT, padx=10)
@@ -1297,6 +1310,7 @@ class CanStudioApp(tk.Tk):
             "channel": self.active_channel,
             "bitrate": self.active_bitrate,
             "simulate": self.simulator is not None,
+            "bridge": self.bridge.get_status() if self.bridge else None,
             "stats": dict(self.stats),
             "message": "Connected" if connected else "Not connected — call connect() first",
         }
@@ -1347,6 +1361,14 @@ class CanStudioApp(tk.Tk):
             self.running = True
             self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
             self.rx_thread.start()
+
+            if self.bridge_var.get():
+                bridge_channel = self.bridge_channel_combo.get().strip()
+                result = self.start_bridge(bridge_channel)
+                if self.bridge is None:
+                    messagebox.showwarning("Bridge", result)
+                else:
+                    self.status_lbl.configure(text=f"{self.status_lbl.cget('text')} | {result}")
             # Update GUI on the main thread (status bar + refresh loop)
             self.after(
                 0,
@@ -1447,6 +1469,10 @@ class CanStudioApp(tk.Tk):
             self.heartbeat_generator_timer = None
             self.btn_periodic_hb.configure(text="Start Heartbeat (1 Hz)")
 
+        if self.bridge:
+            self.bridge.stop()
+            self.bridge = None
+
         if self.simulator:
             self.simulator.stop()
             self.simulator = None
@@ -1471,6 +1497,59 @@ class CanStudioApp(tk.Tk):
         self.status_lbl.configure(text="Status: Disconnected", foreground="red")
         self.lbl_hw_info.configure(text="Adapter: Not Connected")
 
+    def start_bridge(
+        self,
+        channel: str = "239.0.0.1",
+        hop_limit: Optional[int] = None,
+        allow_inject: bool = False,
+    ) -> str:
+        """
+        Mirror the bus currently captured onto a UDP multicast group.
+
+        Args:
+            channel: Multicast address the traffic is republished on.
+            hop_limit: IP hop limit (TTL) of the mirrored datagrams.
+            allow_inject: Also replay network frames onto the captured bus. This writes to
+                real hardware, so it stays off unless explicitly requested.
+        """
+        if not self.bus:
+            return "Not connected — connect to a bus first."
+        if self.bridge:
+            return "A bridge is already running. Stop it first."
+        if self.active_interface == "udp_multicast" and self.active_channel == channel:
+            return f"Cannot mirror {channel} onto itself — choose a different multicast group."
+        try:
+            net_bus = open_can_bus("udp_multicast", channel, 0, hop_limit=hop_limit)
+        except Exception as exc:
+            return f"Bridge failed: {exc}"
+        self.bridge = CanBridge(
+            self.bus,
+            net_bus,
+            allow_inject=allow_inject,
+            network_channel=channel,
+        )
+        self.bridge.start()
+        direction = "bidirectional" if allow_inject else "read-only"
+        return f"Bridging {self.active_interface or 'bus'} to udp_multicast [{channel}] ({direction})"
+
+    def stop_bridge(self) -> str:
+        """Tear the network bridge down, leaving the captured bus connected."""
+        if not self.bridge:
+            return "No bridge running."
+        self.bridge.stop()
+        self.bridge = None
+        return "Bridge stopped."
+
+    def _forward_to_bridge(self, msg) -> None:
+        """Hand a captured frame to the network bridge, never disturbing the capture loop."""
+        bridge = self.bridge
+        if bridge is None:
+            return
+        try:
+            bridge.forward(msg)
+        except Exception:
+            pass
+
     def _rx_loop(self):
         start_time = time.time()
         while self.running:
@@ -1478,6 +1557,8 @@ class CanStudioApp(tk.Tk):
                 msg = self.bus.recv(timeout=0.08)
                 if not msg:
                     continue
+
+                self._forward_to_bridge(msg)
 
                 now = time.time()
                 elapsed = now - start_time

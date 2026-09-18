@@ -82,6 +82,60 @@ Every machine must use the **same multicast address**; the hop limit only needs 
     multicast routing (PIM) or an IGMP proxy enabled. On a plain office LAN without multicast routing,
     keep all machines on one segment.
 
+## Bridging a Real CAN Bus onto the Network
+
+A UDP multicast bus lets several machines share a *virtual* bus. The **bridge** goes one step
+further: it mirrors the bus you are physically connected to — a drive, an inverter, a live
+vehicle harness — onto a multicast group, so remote machines observe the real traffic as if
+they were wired to the same bus.
+
+One machine acts as the gateway: it holds the USB-CAN adapter and republishes everything it
+captures. Every other machine simply connects to the same multicast address.
+
+### From the GUI
+Tick **Bridge → Net** in the connection toolbar and set the multicast address next to it, then
+click **Connect**. The bridge is armed with the connection and torn down when you disconnect.
+
+### From MCP / A2A
+
+```python
+bridge_start(channel="239.0.0.1")  # read-only mirroring
+bridge_start(channel="239.0.0.1", hop_limit=4)  # across subnets
+bridge_stop()
+```
+
+`get_status()` reports the bridge with its counters: `forwarded`, `injected`, `suppressed`,
+`suppressed_inject` and `errors`.
+
+### Direction of Traffic
+
+By default the bridge is **read-only**: frames flow from the real bus to the network, never the
+other way. Remote machines observe, they do not command.
+
+Passing `allow_inject=True` opens the return path, replaying frames received from the network
+onto the real bus:
+
+```python
+bridge_start(channel="239.0.0.1", allow_inject=True)
+```
+
+!!! danger "Injection writes to real hardware"
+    With injection enabled, anyone on the multicast group can transmit on your physical CAN bus
+    — which means commanding the connected device. On a drive this moves a motor. Enable it only
+    on a trusted network and with the equipment in a safe state.
+
+### Loop Protection
+A multicast socket receives its own datagrams back. Without protection a bidirectional bridge
+would re-inject every frame it just mirrored, flooding the real bus. The bridge therefore
+remembers what it sends in each direction for a short window (250 ms by default) and discards
+the reflection; the `suppressed` and `suppressed_inject` counters show this working.
+
+Two further rules keep the topology sane:
+
+- The bridge refuses to mirror a multicast group **onto itself**, which would loop immediately.
+- Do not arm a bridge on two machines for the same pair of buses: each would relay the other's
+  traffic back. One gateway per physical bus.
+
 ### Simulating a CANopen Node
 CANopen Studio includes a built-in virtual node that generates telemetry (Heartbeats, SYNC pulses, CiA 402/SEVCON PDOs, and SDO responses).
 - **In the GUI**: Simply check the **"Simulate"** checkbox next to the Channel selector before clicking Connect. This will inject the simulated traffic directly onto the active bus (whether it's a physical USB interface, SocketCAN, or a UDP Multicast IP).

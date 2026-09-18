@@ -19,6 +19,7 @@ def make_app(**overrides):
         "instance_name": "",
         "bus": None,
         "simulator": None,
+        "bridge": None,
         "active_interface": "",
         "active_channel": "",
         "active_bitrate": 0,

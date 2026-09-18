@@ -300,6 +300,38 @@ def send_sync() -> str:
 
 
 @mcp.tool()
+def bridge_start(
+    channel: str = "239.0.0.1",
+    hop_limit: int | None = None,
+    allow_inject: bool = False,
+) -> str:
+    """Mirror the currently captured CAN bus onto a UDP multicast group.
+
+    Lets remote machines observe a real device (a drive, an inverter) connected to this
+    machine's CAN adapter, as if they were wired to the same bus.
+
+    Args:
+        channel: Multicast address the traffic is republished on.
+        hop_limit: IP hop limit (TTL) of the mirrored datagrams. 1 (the default) keeps them
+            on the local segment; raise it to reach other subnets.
+        allow_inject: Also replay frames received from the network onto the real bus.
+            This writes to real hardware and lets remote clients command the device, so it
+            is off by default.
+    """
+    if _app_ref is None:
+        return "Bridging requires the GUI — the standalone MCP server has no capture loop."
+    return _app_ref.start_bridge(channel, hop_limit=hop_limit, allow_inject=allow_inject)
+
+
+@mcp.tool()
+def bridge_stop() -> str:
+    """Stop mirroring the captured bus onto the network. The bus stays connected."""
+    if _app_ref is None:
+        return "Bridging requires the GUI — the standalone MCP server has no capture loop."
+    return _app_ref.stop_bridge()
+
+
+@mcp.tool()
 def get_network_state() -> dict:
     """Return discovered CANopen nodes and live telemetry (RPM, torque, temperature)."""
     return _get_network()
