@@ -44,10 +44,10 @@ def main():
         "--name=CANopen-Studio",
         f"--icon={icon_path}",
         # Assets & metadata
-        f"--add-data={os.path.join('assets', 'icon.ico')};assets",
-        f"--add-data={os.path.join('assets', 'icon.png')};assets",
-        "--add-data=LICENSE;.",
-        "--add-data=README.md;.",
+        f"--add-data={os.path.join('assets', 'icon.ico')}{os.pathsep}assets",
+        f"--add-data={os.path.join('assets', 'icon.png')}{os.pathsep}assets",
+        f"--add-data=LICENSE{os.pathsep}.",
+        f"--add-data=README.md{os.pathsep}.",
         # Hidden imports for dynamic CAN interfaces and decoders
         "--hidden-import=serial",
         "--hidden-import=serial.tools.list_ports",

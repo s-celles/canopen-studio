@@ -1,4 +1,4 @@
-name: Build and Release Windows Installer
+name: Build and Publish Releases
 
 on:
   push:
@@ -7,8 +7,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            os_name: Windows
+          - os: macos-latest
+            os_name: macOS
+          - os: ubuntu-latest
+            os_name: Linux
+
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: write
 
@@ -25,6 +35,12 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk libxcb-xinerama0
+
       - name: Install dependencies
         run: uv sync
 
@@ -34,12 +50,22 @@ jobs:
       - name: Build standalone application with PyInstaller
         run: uv run --with pyinstaller python scripts/build_exe.py --clean
 
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress
+      - name: Build Portable Archive (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path dist/CANopen-Studio/* -DestinationPath dist/CANopen-Studio-Windows-x64-Portable.zip -Force
 
-      - name: Compile Inno Setup Installer
+      - name: Build Portable Archive (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          if [ -d "CANopen-Studio.app" ]; then tar -czvf CANopen-Studio-${{ matrix.os_name }}-x64-Portable.tar.gz CANopen-Studio.app/; else tar -czvf CANopen-Studio-${{ matrix.os_name }}-x64-Portable.tar.gz CANopen-Studio/; fi
+
+      - name: Install Inno Setup and Compile (Windows Only)
+        if: runner.os == 'Windows'
         shell: powershell
         run: |
+          choco install innosetup --no-progress
           $cmd = Get-Command iscc -ErrorAction SilentlyContinue
           if ($cmd) {
             $iscc = $cmd.Source
@@ -48,15 +74,10 @@ jobs:
           } elseif (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe") {
             $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe"
           } else {
-            Write-Error "ISCC.exe (Inno Setup Compiler) was not found."
+            Write-Error "ISCC.exe was not found."
             exit 1
           }
-          Write-Host "Compiling installer using: $iscc"
           & $iscc installer/CANopenStudio.iss
-
-      - name: Create Portable Zip
-        run: |
-          Compress-Archive -Path dist/CANopen-Studio/* -DestinationPath dist/CANopen-Studio-Windows-x64-Portable.zip -Force
 
       - name: Publish GitHub Release Assets
         uses: softprops/action-gh-release@v3
@@ -65,4 +86,5 @@ jobs:
           files: |
             dist/*-Setup.exe
             dist/*-Portable.zip
+            dist/*-Portable.tar.gz
           generate_release_notes: true
