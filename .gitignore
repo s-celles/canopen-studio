@@ -31,7 +31,6 @@
 
 # 7. Whitelist packaging, scripts, icons, installer and metadata
 !/CHANGELOG.md
-!/upstream-bugs.md
 !/install.bat
 !/install.sh
 !/scripts/

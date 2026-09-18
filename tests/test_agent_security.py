@@ -114,7 +114,7 @@ class TestLocalOnlyMiddleware:
     The ASGI guard actually mounted on both servers.
 
     It exists because fastmcp 4.0.5 silently ignores host_origin_protection on the SSE
-    transport (see upstream-bugs.md), so the project cannot rely on the built-in one.
+    transport, so the project cannot rely on the built-in one.
     """
 
     @pytest.fixture

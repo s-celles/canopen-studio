@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented the real exposure of each server, why their defaults differ, and what remains uncovered (no authentication: any local process can still reach a running server).
 
 ### Fixed
-- Worked around fastmcp 4.0.5 silently ignoring `host_origin_protection` on the SSE transport, which left the protection absent while appearing enabled; the MCP server now mounts the project's own guard. See `upstream-bugs.md`.
+- Worked around fastmcp 4.0.5 silently ignoring `host_origin_protection` on the SSE transport, which left the protection absent while appearing enabled: the guard middleware is never installed although the setting is accepted, so the MCP server builds and guards its SSE application itself.
 
 ## [0.3.0] - 2026-09-18 [WITHDRAWN]
 

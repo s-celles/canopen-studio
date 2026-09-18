@@ -376,10 +376,11 @@ def build_app():
     """
     Build the guarded SSE application.
 
-    fastmcp 4.0.5 accepts host_origin_protection but silently drops it on the SSE transport
-    (see upstream-bugs.md), so the project mounts its own guard rather than trusting a
-    setting that does nothing. Without it a web page the user visits can reach these tools,
-    and they transmit on a CAN bus.
+    fastmcp 4.0.5 accepts host_origin_protection but silently drops it on the SSE transport:
+    HostOriginGuardMiddleware is never installed, with no warning, although the same call
+    with transport="http" installs it. The project therefore mounts its own guard rather
+    than trusting a setting that does nothing. Without it a web page the user visits can
+    reach these tools, and they transmit on a CAN bus.
     """
     app = mcp.http_app(transport="sse")
     app.add_middleware(_sec.LocalOnlyMiddleware)
