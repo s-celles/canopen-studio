@@ -169,6 +169,7 @@ class VirtualCanopenSimulator:
         self.sim_bus: Optional[can.Bus] = None
         self.channel = "virtual_bus"
         self._owns_bus = False
+        self.running = False
 
         if hasattr(channel_or_bus, "send") and hasattr(channel_or_bus, "recv"):
             self.sim_bus = channel_or_bus
