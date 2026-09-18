@@ -8,7 +8,7 @@ Standalone:  uv run canopen-mcp
 Integrated:  started automatically by can_gui.py in a daemon thread.
 
 Claude Code integration:
-  claude mcp add --transport sse http://localhost:3001/sse canopen-studio
+  claude mcp add --transport sse canopen-studio http://localhost:3001/sse
 """
 
 from __future__ import annotations
@@ -329,8 +329,7 @@ def start_in_thread(host: str = MCP_HOST, port: int = MCP_PORT) -> threading.Thr
 def main() -> None:
     """Standalone entry point: uv run canopen-mcp"""
     print(f"CANopen Studio MCP server starting on http://{MCP_HOST}:{MCP_PORT}")
-    print("Claude Code: claude mcp add --transport sse "
-          f"http://{MCP_HOST}:{MCP_PORT}/sse canopen-studio")
+    print(f"Claude Code: claude mcp add --transport sse canopen-studio http://{MCP_HOST}:{MCP_PORT}/sse")
     mcp.run(transport="sse", host=MCP_HOST, port=MCP_PORT)
 
 
