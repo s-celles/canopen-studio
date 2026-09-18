@@ -29,11 +29,21 @@ import time
 import threading
 import csv
 import collections
+import webbrowser
 from typing import Optional, Dict, Any
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 import can
+from updater import (
+    CURRENT_VERSION,
+    GITHUB_REPO,
+    check_for_updates,
+    is_git_repo,
+    perform_git_update,
+    download_file,
+    launch_installer_and_exit,
+)
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
@@ -221,6 +231,9 @@ class CanStudioApp(tk.Tk):
         self._create_widgets()
         self._init_interface_selection()
 
+        # Non-blocking background update check
+        threading.Thread(target=self._background_update_check, daemon=True).start()
+
     def _create_widgets(self):
         # 0. Menu Bar
         menubar = tk.Menu(self)
@@ -240,6 +253,8 @@ class CanStudioApp(tk.Tk):
 
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Check for Updates...", command=lambda: self._check_updates_dialog(manual=True))
+        help_menu.add_separator()
         help_menu.add_command(label="About...", command=self._show_about)
 
         # 1. Universal Hardware Connection Toolbar
@@ -333,6 +348,23 @@ class CanStudioApp(tk.Tk):
         self.tab_ref = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_ref, text=" 📚 CANopen Reference ")
         self._build_reference_tab()
+
+        # Bottom Status Bar with Version & Update Alert
+        self.status_bar = ttk.Frame(self, relief=tk.SUNKEN, padding=(6, 3))
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+        self.status_version_lbl = ttk.Label(
+            self.status_bar,
+            text=f"CAN & CANopen Studio v{CURRENT_VERSION}",
+            font=("Segoe UI", 9),
+        )
+        self.status_version_lbl.pack(side=tk.LEFT, padx=5)
+
+        self.status_update_btn = ttk.Button(
+            self.status_bar,
+            text="✨ Update Available!",
+            command=lambda: self._check_updates_dialog(manual=True),
+        )
 
     def _init_interface_selection(self):
         """Set default interface to SLCAN (or auto-detect CANUSB on COM port)."""
@@ -1697,6 +1729,169 @@ class CanStudioApp(tk.Tk):
                 "GNU General Public License v3.0\n\nCopyright (C) 2026 Sébastien Celles\n\nSee: https://www.gnu.org/licenses/gpl-3.0.html",
             )
         txt.configure(state=tk.DISABLED)
+
+    # ==========================================================================
+    # Application Update Mechanism
+    # ==========================================================================
+    def _background_update_check(self):
+        """Runs in background on launch to notify if a newer version exists."""
+        time.sleep(1.5)  # Let UI finish initial window display
+        has_update, info = check_for_updates()
+        if has_update and info:
+            self.after(0, self._notify_update_available, info)
+
+    def _notify_update_available(self, info: Dict[str, Any]):
+        tag = info.get("tag_name", "new version")
+        self.status_version_lbl.config(
+            text=f"CAN & CANopen Studio v{CURRENT_VERSION}  —  ⚡ New release {tag} available!"
+        )
+        self.status_update_btn.config(text=f"🚀 Update to {tag}")
+        self.status_update_btn.pack(side=tk.RIGHT, padx=6)
+
+    def _check_updates_dialog(self, manual: bool = True):
+        top = tk.Toplevel(self)
+        top.title("CANopen Studio - Check for Updates")
+        top.geometry("540x440")
+        top.transient(self)
+
+        content = ttk.Frame(top, padding=16)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        status_hdr = ttk.Label(content, text="Checking GitHub for latest release...", font=("Segoe UI", 11, "bold"))
+        status_hdr.pack(anchor=tk.W, pady=(0, 10))
+
+        details_txt = tk.Text(content, wrap=tk.WORD, height=12, font=("Consolas", 9), padx=8, pady=8)
+        details_txt.pack(fill=tk.BOTH, expand=True, pady=(0, 12))
+        details_txt.insert(tk.END, f"Querying GitHub Releases for {GITHUB_REPO}...\n")
+        details_txt.configure(state=tk.DISABLED)
+
+        btn_bar = ttk.Frame(content)
+        btn_bar.pack(fill=tk.X)
+
+        close_btn = ttk.Button(btn_bar, text="Close", command=top.destroy)
+        close_btn.pack(side=tk.RIGHT, padx=4)
+
+        def worker():
+            has_update, info = check_for_updates()
+            self.after(0, lambda: on_finish(has_update, info))
+
+        def on_finish(has_update, info):
+            details_txt.configure(state=tk.NORMAL)
+            details_txt.delete("1.0", tk.END)
+
+            if info is None:
+                status_hdr.config(text="⚠️ Could not check for updates")
+                details_txt.insert(
+                    tk.END,
+                    "Unable to reach GitHub. Please verify your internet connection.\n"
+                    f"Repository: https://github.com/{GITHUB_REPO}\n",
+                )
+                details_txt.configure(state=tk.DISABLED)
+                return
+
+            tag = info.get("tag_name", "v0.0.0")
+            if has_update:
+                status_hdr.config(text=f"✨ Update Available: {tag}!")
+                details_txt.insert(
+                    tk.END,
+                    f"Current Version: v{CURRENT_VERSION}\n"
+                    f"Latest Version:  {tag}\n"
+                    f"Published Date:  {info.get('published_at', '')}\n\n"
+                    f"--- Release Notes ---\n{info.get('body', 'No release notes provided.')}\n",
+                )
+
+                setup_asset = info.get("setup_asset")
+                if setup_asset:
+                    dl_btn = ttk.Button(
+                        btn_bar,
+                        text="📥 Download & Install",
+                        command=lambda: self._download_and_run_installer(top, setup_asset),
+                    )
+                    dl_btn.pack(side=tk.LEFT, padx=4)
+
+                if is_git_repo():
+
+                    def do_git_update():
+                        status_hdr.config(text="Updating repository via git pull & uv sync...")
+                        ok, msg = perform_git_update()
+                        if ok:
+                            messagebox.showinfo("Git Update", f"{msg}\nPlease restart CANopen Studio.")
+                            top.destroy()
+                        else:
+                            messagebox.showerror("Git Update Failed", msg)
+
+                    git_btn = ttk.Button(btn_bar, text="🔄 Update via Git & uv", command=do_git_update)
+                    git_btn.pack(side=tk.LEFT, padx=4)
+
+                gh_btn = ttk.Button(
+                    btn_bar,
+                    text="🌐 View on GitHub",
+                    command=lambda: webbrowser.open(info.get("html_url")),
+                )
+                gh_btn.pack(side=tk.LEFT, padx=4)
+            else:
+                status_hdr.config(text="✅ You are using the latest version!")
+                details_txt.insert(
+                    tk.END,
+                    f"Current Version: v{CURRENT_VERSION}\n"
+                    f"Latest Version:  {tag}\n\n"
+                    "Your installation of CAN & CANopen Studio is up to date.\n",
+                )
+
+            details_txt.configure(state=tk.DISABLED)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _download_and_run_installer(self, parent_win, asset: Dict[str, Any]):
+        url = asset.get("browser_download_url")
+        name = asset.get("name", "CANopen-Studio-Setup.exe")
+        if not url:
+            return
+
+        import tempfile
+
+        tmp_dir = tempfile.gettempdir()
+        dest_path = os.path.join(tmp_dir, name)
+
+        prog_win = tk.Toplevel(parent_win)
+        prog_win.title("Downloading Update...")
+        prog_win.geometry("400x120")
+        prog_win.transient(parent_win)
+
+        lbl = ttk.Label(prog_win, text=f"Downloading {name}...", font=("Segoe UI", 9))
+        lbl.pack(padx=16, pady=(16, 8), anchor=tk.W)
+
+        pbar = ttk.Progressbar(prog_win, mode="determinate")
+        pbar.pack(fill=tk.X, padx=16, pady=8)
+
+        def progress_cb(downloaded, total):
+            pct = int((downloaded / total) * 100) if total > 0 else 0
+            self.after(0, lambda: pbar.configure(value=pct))
+
+        def dl_worker():
+            success = download_file(url, dest_path, progress_callback=progress_cb)
+            if success:
+                self.after(
+                    0,
+                    lambda: (
+                        prog_win.destroy(),
+                        messagebox.showinfo(
+                            "Download Complete",
+                            "Installer downloaded successfully.\nCANopen Studio will now close to start the installer.",
+                        ),
+                        launch_installer_and_exit(dest_path),
+                    ),
+                )
+            else:
+                self.after(
+                    0,
+                    lambda: (
+                        prog_win.destroy(),
+                        messagebox.showerror("Download Failed", f"Failed to download update installer {name}."),
+                    ),
+                )
+
+        threading.Thread(target=dl_worker, daemon=True).start()
 
 
 def main():

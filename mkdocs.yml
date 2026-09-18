@@ -1,0 +1,52 @@
+site_name: CAN & CANopen Studio
+site_description: Universal CAN & CANopen protocol analyzer, telemetry plotter, and transmit station
+site_author: Sébastien Celles
+site_url: https://s-celles.github.io/canopen-studio/
+repo_url: https://github.com/s-celles/canopen-studio
+repo_name: s-celles/canopen-studio
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: cyan
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+    - scheme: default
+      primary: cyan
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - tables
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quick Start: quickstart.md
+  - Hardware & Interfaces: hardware.md
+  - Protocol Stack & Decoders: decoders.md
+  - Telemetry & Oscilloscope: telemetry.md
+  - Transmission Console: transmission.md
+  - SDO & NMT Master: sdo_nmt.md
+  - Screenshots Gallery: gallery.md
+  - In-App Updates: updates.md

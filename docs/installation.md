@@ -84,3 +84,16 @@ Whenever a Git tag matching `v*` is pushed:
 2. Inno Setup compiles the native Windows Setup wizard.
 3. A portable `.zip` is created.
 4. Assets are automatically attached to the GitHub Release.
+
+---
+
+## 6. In-App Updates & Maintenance
+
+CAN & CANopen Studio includes a built-in update mechanism:
+- **Background Checks**: On application launch, a non-blocking background thread checks GitHub Releases for new versions without impacting startup performance.
+- **Visual Notification**: If an update is detected, a notice and an update button appear in the bottom status bar.
+- **Manual Verification**: Accessible via **Help → Check for Updates...**.
+- **1-Click Upgrade**:
+  - For Windows Installer users: Downloads the setup executable directly and executes it to update the existing installation.
+  - For Source / Git users: Offers a **Update via Git & uv** button that executes `git pull` and `uv sync` automatically.
+

@@ -75,9 +75,17 @@ listen-only:
 sample count="20":
     uv run python can_sniffer.py -c {{count}}
 
-# Clean temporary files, caches, and logs
+# Clean temporary files, caches, build artifacts, and documentation site
 clean:
-    Get-ChildItem -Path . -Include __pycache__,*.csv,.pytest_cache,build,dist -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -Path . -Include __pycache__,*.csv,.pytest_cache,build,dist,site -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# Build static documentation site with MkDocs Material
+doc-build:
+    uv run --with mkdocs-material mkdocs build --strict
+
+# Serve live documentation locally
+doc-serve:
+    uv run --with mkdocs-material mkdocs serve
 
 # Run 1-click Windows installer (sets up environment and creates Desktop & Start Menu shortcuts)
 install:

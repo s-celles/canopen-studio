@@ -12,13 +12,14 @@
 !/LICENSE
 !/README.md
 !/pyproject.toml
-!/uv.lock
 !/justfile
+!/mkdocs.yml
 
 # 3. Whitelist Python application source files
 !/can_gui.py
 !/can_sniffer.py
 !/can_interfaces.py
+!/updater.py
 
 # 4. Whitelist CANopen protocol stack package and decoders
 !/canopen_stack/
@@ -61,4 +62,6 @@
 Thumbs.db
 build/
 dist/
+site/
+uv.lock
 

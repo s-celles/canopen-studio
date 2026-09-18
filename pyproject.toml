@@ -39,5 +39,5 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["can_gui", "can_sniffer", "can_interfaces"]
+py-modules = ["can_gui", "can_sniffer", "can_interfaces", "updater"]
 packages = ["canopen_stack", "canopen_stack.decoders"]
