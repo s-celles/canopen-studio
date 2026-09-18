@@ -10,7 +10,7 @@ import pytest
 
 pytest.importorskip("tkinter", reason="GUI module requires the tkinter bindings")
 
-from can_gui import CanStudioApp  # noqa: E402
+from canopen_studio.gui import CanStudioApp  # noqa: E402
 
 
 def make_app(**overrides):

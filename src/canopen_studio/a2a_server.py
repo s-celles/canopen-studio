@@ -5,7 +5,7 @@ Implements the Google A2A protocol spec (JSON-RPC 2.0 over HTTP) so that
 external AI agents can interact with the CAN bus through the studio.
 
 Standalone:  uv run canopen-a2a
-Integrated:  started automatically by can_gui.py in a daemon thread.
+Integrated:  started automatically by gui.py in a daemon thread.
 
 Protocol:
   GET  /.well-known/agent.json  — agent card (skills & capabilities)
@@ -25,8 +25,9 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from can_interfaces import open_can_bus, VirtualCanopenSimulator
-from canopen_stack import CANopenLayer, get_default_registry
+from canopen_studio import __version__
+from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
+from canopen_studio.stack import CANopenLayer, get_default_registry
 
 if TYPE_CHECKING:
     pass
@@ -37,7 +38,7 @@ A2A_HOST = "localhost"
 A2A_PORT = int(_os.environ.get("A2A_PORT", 8765))
 
 # ---------------------------------------------------------------------------
-# Shared state — same pattern as can_mcp_server.py
+# Shared state — same pattern as mcp_server.py
 # ---------------------------------------------------------------------------
 _app_ref: Any = None
 _standalone_bus: can.Bus | None = None
@@ -298,7 +299,7 @@ AGENT_CARD = {
         "monitors CANopen nodes and telemetry."
     ),
     "url": f"http://{A2A_HOST}:{A2A_PORT}",
-    "version": "1.0.0",
+    "version": __version__,
     "capabilities": {
         "streaming": False,
         "pushNotifications": False,
@@ -405,7 +406,7 @@ async def jsonrpc_endpoint(request: Request) -> JSONResponse:
 
 
 def start_in_thread(host: str = A2A_HOST, port: int = A2A_PORT) -> threading.Thread:
-    """Start the A2A HTTP server in a daemon thread (used by can_gui)."""
+    """Start the A2A HTTP server in a daemon thread (used by canopen_studio.gui)."""
 
     def _run() -> None:
         loop = asyncio.new_event_loop()

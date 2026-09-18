@@ -33,8 +33,8 @@ import webbrowser
 from typing import Optional, Dict, Any
 
 try:
-    import can_mcp_server as _mcp
-    import can_a2a_server as _a2a
+    import canopen_studio.mcp_server as _mcp
+    import canopen_studio.a2a_server as _a2a
 
     _SERVERS_AVAILABLE = True
 except ImportError:
@@ -43,8 +43,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
 import can
-from can_bridge import CanBridge
-from updater import (
+from canopen_studio.bridge import CanBridge
+from canopen_studio.updater import (
     CURRENT_VERSION,
     GITHUB_REPO,
     check_for_updates,
@@ -56,12 +56,12 @@ from updater import (
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-from canopen_stack import (
+from canopen_studio.stack import (
     CANopenLayer,
     NmtState,
     get_default_registry,
 )
-from can_interfaces import (
+from canopen_studio.interfaces import (
     SUPPORTED_INTERFACES,
     STANDARD_BITRATES,
     list_com_ports,
@@ -1348,8 +1348,8 @@ class CanStudioApp(tk.Tk):
         if self.bus:
             return "Already connected. Disconnect first."
         try:
-            from can_interfaces import open_can_bus as _open, VirtualCanopenSimulator as _Sim
-            from canopen_stack import CANopenLayer as _Layer, get_default_registry as _reg
+            from canopen_studio.interfaces import open_can_bus as _open, VirtualCanopenSimulator as _Sim
+            from canopen_studio.stack import CANopenLayer as _Layer, get_default_registry as _reg
 
             self.bus = _open(interface, channel, bitrate, hop_limit=hop_limit)
             if simulate:
@@ -1887,7 +1887,9 @@ class CanStudioApp(tk.Tk):
             foreground="#007acc",
         ).pack(pady=(0, 6))
 
-        ttk.Label(f, text="Version 0.2.1", font=("Segoe UI", 9, "italic"), foreground="#666666").pack(pady=(0, 8))
+        ttk.Label(f, text=f"Version {CURRENT_VERSION}", font=("Segoe UI", 9, "italic"), foreground="#666666").pack(
+            pady=(0, 8)
+        )
 
         info_box = ttk.LabelFrame(f, text=" Project & Author ", padding=10)
         info_box.pack(fill=tk.X, pady=4)

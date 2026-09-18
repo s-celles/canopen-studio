@@ -1,6 +1,7 @@
 [project]
 name = "canopen-studio"
-version = "0.2.1"
+# Declared once in src/canopen_studio/__init__.py and read from there (see tool.setuptools.dynamic).
+dynamic = ["version"]
 description = "Universal CAN & CANopen protocol analyzer, telemetry plotter, and transmit station"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,18 +40,21 @@ ignore = ["E501"]  # Ignore line-length violations for long comments / strings
 
 
 [project.scripts]
-canopen-studio = "can_gui:main"
-can-sniffer = "can_sniffer:main"
-canopen-mcp = "can_mcp_server:main"
-canopen-a2a = "can_a2a_server:main"
+canopen-studio = "canopen_studio.gui:main"
+can-sniffer = "canopen_studio.sniffer:main"
+canopen-mcp = "canopen_studio.mcp_server:main"
+canopen-a2a = "canopen_studio.a2a_server:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["can_gui", "can_sniffer", "can_interfaces", "can_bridge", "can_mcp_server", "can_a2a_server", "updater"]
-packages = ["canopen_stack", "canopen_stack.decoders"]
+package-dir = { "" = "src" }
+packages = ["canopen_studio", "canopen_studio.stack", "canopen_studio.stack.decoders"]
+
+[tool.setuptools.dynamic]
+version = { attr = "canopen_studio.__version__" }
 
 [tool.mypy]
 ignore_missing_imports = true

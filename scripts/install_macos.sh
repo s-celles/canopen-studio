@@ -50,7 +50,7 @@ cat << 'LAUNCHER' > "$APP_DIR/Contents/MacOS/CANopen Studio"
 #!/usr/bin/env bash
 export PATH="$HOME/.local/bin:$PATH"
 cd "APP_ROOT_DIR"
-exec uv run can_gui.py >/dev/null 2>&1
+exec uv run canopen-studio >/dev/null 2>&1
 LAUNCHER
 
 sed -i '' "s|APP_ROOT_DIR|$PROJECT_ROOT|g" "$APP_DIR/Contents/MacOS/CANopen Studio"

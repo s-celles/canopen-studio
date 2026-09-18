@@ -3,11 +3,12 @@ Unit tests for the application updater mechanism.
 """
 
 from unittest.mock import patch, MagicMock
-from updater import (
+from canopen_studio.updater import (
     parse_version_tuple,
     compare_versions,
     check_for_updates,
     is_git_repo,
+    find_repo_root,
 )
 
 
@@ -118,3 +119,22 @@ class TestCheckForUpdates:
     def test_is_git_repo(self):
         # In current repo, .git exists
         assert is_git_repo() is True
+
+    def test_repo_root_is_found_from_a_nested_package(self, tmp_path):
+        """The package lives under src/, so the checkout root is several levels up."""
+        (tmp_path / ".git").mkdir()
+        nested = tmp_path / "src" / "canopen_studio"
+        nested.mkdir(parents=True)
+
+        assert find_repo_root(str(nested)) == str(tmp_path)
+
+    def test_repo_root_is_none_outside_a_checkout(self, tmp_path):
+        assert find_repo_root(str(tmp_path)) is None
+
+    def test_is_git_repo_is_false_outside_a_checkout(self, tmp_path):
+        assert is_git_repo(str(tmp_path)) is False
+
+    def test_a_file_named_git_is_not_a_checkout(self, tmp_path):
+        (tmp_path / ".git").write_text("gitdir: elsewhere")
+
+        assert find_repo_root(str(tmp_path)) is None

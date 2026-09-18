@@ -15,18 +15,11 @@
 !/justfile
 !/mkdocs.yml
 
-# 3. Whitelist Python application source files
-!/can_gui.py
-!/can_sniffer.py
-!/can_interfaces.py
-!/can_bridge.py
-!/can_mcp_server.py
-!/can_a2a_server.py
-!/updater.py
-
-# 4. Whitelist CANopen protocol stack package and decoders
-!/canopen_stack/
-!/canopen_stack/**
+# 3. Whitelist the Python package (src layout): application modules and protocol stack
+!/src/
+!/src/**
+# ...but never the build metadata setuptools drops next to it
+/src/*.egg-info/
 
 # 5. Whitelist documentation assets and screenshots
 !/docs/

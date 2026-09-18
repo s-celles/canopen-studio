@@ -5,7 +5,7 @@ Exposes CAN bus operations as tools for Claude / MCP clients.
 Runs as an SSE server on http://localhost:3001.
 
 Standalone:  uv run canopen-mcp
-Integrated:  started automatically by can_gui.py in a daemon thread.
+Integrated:  started automatically by gui.py in a daemon thread.
 
 Claude Code integration:
   claude mcp add --transport sse canopen-studio http://localhost:3001/sse
@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Any
 import can
 from fastmcp import FastMCP
 
-from can_interfaces import open_can_bus, VirtualCanopenSimulator
-from canopen_stack import CANopenLayer, get_default_registry
+from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
+from canopen_studio.stack import CANopenLayer, get_default_registry
 
 if TYPE_CHECKING:
     pass
@@ -43,7 +43,7 @@ mcp = FastMCP(
 # Shared state — used when running standalone (no GUI).
 # When embedded in the GUI, tools delegate to the app reference instead.
 # ---------------------------------------------------------------------------
-_app_ref: Any = None  # set by can_gui when running integrated
+_app_ref: Any = None  # set by canopen_studio.gui when running integrated
 _standalone_bus: can.Bus | None = None
 _standalone_sim_bus: can.Bus | None = None
 _standalone_simulator: VirtualCanopenSimulator | None = None
@@ -55,7 +55,7 @@ _standalone_rx_thread: threading.Thread | None = None
 
 
 def set_app(app: Any) -> None:
-    """Called by can_gui to register the GUI app as the state provider."""
+    """Called by canopen_studio.gui to register the GUI app as the state provider."""
     global _app_ref
     _app_ref = app
 
@@ -365,7 +365,7 @@ def sdo_read(node_id: int, index: int, subindex: int = 0) -> str:
 
 
 def start_in_thread(host: str = MCP_HOST, port: int = MCP_PORT) -> threading.Thread:
-    """Start the MCP SSE server in a daemon thread (used by can_gui)."""
+    """Start the MCP SSE server in a daemon thread (used by canopen_studio.gui)."""
 
     def _run() -> None:
         loop = asyncio.new_event_loop()

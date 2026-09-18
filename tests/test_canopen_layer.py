@@ -4,12 +4,12 @@ Unit tests for CANopen protocol abstraction layer (CANopenLayer).
 
 import pytest
 import can
-from canopen_stack.types import (
+from canopen_studio.stack.types import (
     NmtCommand,
     NmtState,
     CanopenService,
 )
-from canopen_stack.canopen_layer import CANopenLayer
+from canopen_studio.stack.canopen_layer import CANopenLayer
 
 
 class TestCANopenLayer:

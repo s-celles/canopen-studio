@@ -98,6 +98,8 @@ click **Connect**. The bridge is armed with the connection and torn down when yo
 
 ### From MCP / A2A
 
+See [AI Integration](ai_integration.md) for the full tool reference.
+
 ```python
 bridge_start(channel="239.0.0.1")  # read-only mirroring
 bridge_start(channel="239.0.0.1", hop_limit=4)  # across subnets

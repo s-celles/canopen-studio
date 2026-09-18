@@ -63,9 +63,9 @@ def main():
         "--hidden-import=msgpack",
         "--hidden-import=matplotlib.backends.backend_tkagg",
         "--hidden-import=canopen",
-        "--collect-submodules=canopen_stack",
+        "--collect-submodules=canopen_studio",
         # Source entry
-        "can_gui.py",
+        "src/canopen_studio/gui.py",
     ]
 
     if args.onefile:

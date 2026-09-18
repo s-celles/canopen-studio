@@ -4,7 +4,7 @@ Unit tests for the MCP server tools, in both standalone and GUI-integrated modes
 
 import pytest
 
-import can_mcp_server as mcp_server
+import canopen_studio.mcp_server as mcp_server
 
 
 class FakeBus:

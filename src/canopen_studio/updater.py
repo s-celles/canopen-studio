@@ -15,13 +15,15 @@ import urllib.request
 import urllib.error
 from typing import Tuple, Optional, Dict, Any, Callable
 
-CURRENT_VERSION = "0.2.1"
+from canopen_studio import __version__
+
+CURRENT_VERSION = __version__
 GITHUB_REPO = "s-celles/canopen-studio"
 
 
 def parse_version_tuple(version_str: str) -> Tuple[int, ...]:
     """
-    Parse a version string (e.g. '0.2.1' or 'v1.4.12') into a tuple of integers.
+    Parse a version string such as 1.2.3 or v1.4.12 into a tuple of integers.
     """
     cleaned = version_str.strip().lstrip("vV")
     parts = re.findall(r"\d+", cleaned)
@@ -144,12 +146,31 @@ def check_for_updates(
         return False, None
 
 
+def find_repo_root(start: Optional[str] = None) -> Optional[str]:
+    """
+    Walk up from a directory looking for the checkout that contains it.
+
+    The package is installed under src/canopen_studio/, so the working copy root is
+    several levels above this module rather than its immediate parent.
+
+    Returns the repository root, or None when running outside a git checkout
+    (a wheel install, a frozen executable).
+    """
+    if start is None:
+        start = os.path.dirname(os.path.abspath(__file__))
+    current = os.path.abspath(start)
+    while True:
+        if os.path.isdir(os.path.join(current, ".git")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
 def is_git_repo(path: Optional[str] = None) -> bool:
-    """Check if the given directory (or project root) is a git repository."""
-    if path is None:
-        path = os.path.dirname(os.path.abspath(__file__))
-    git_dir = os.path.join(path, ".git")
-    return os.path.exists(git_dir) and os.path.isdir(git_dir)
+    """Check whether the given directory (or this module) sits inside a git checkout."""
+    return find_repo_root(path) is not None
 
 
 def perform_git_update(repo_dir: Optional[str] = None) -> Tuple[bool, str]:
@@ -157,7 +178,9 @@ def perform_git_update(repo_dir: Optional[str] = None) -> Tuple[bool, str]:
     Runs git pull and uv sync to update local source installation.
     """
     if repo_dir is None:
-        repo_dir = os.path.dirname(os.path.abspath(__file__))
+        repo_dir = find_repo_root()
+    if repo_dir is None:
+        return False, "Not a git checkout — update from the installer instead."
 
     try:
         # 1. git pull

@@ -3,12 +3,12 @@ Unit tests for CANopen & vehicle protocol decoders (Sevcon Gen4, CiA 402, De Haa
 """
 
 import pytest
-from canopen_stack.registry import DecoderRegistry, get_default_registry
-from canopen_stack.decoders.sevcon_gen4 import SevconGen4Decoder
-from canopen_stack.decoders.cia402_generic import CiA402GenericDecoder
-from canopen_stack.decoders.de_haardt import DeHaardtTransponderDecoder
-from canopen_stack.decoders.j1939_extended import J1939ExtendedDecoder
-from canopen_stack.types import CanopenMessage, CanopenService
+from canopen_studio.stack.registry import DecoderRegistry, get_default_registry
+from canopen_studio.stack.decoders.sevcon_gen4 import SevconGen4Decoder
+from canopen_studio.stack.decoders.cia402_generic import CiA402GenericDecoder
+from canopen_studio.stack.decoders.de_haardt import DeHaardtTransponderDecoder
+from canopen_studio.stack.decoders.j1939_extended import J1939ExtendedDecoder
+from canopen_studio.stack.types import CanopenMessage, CanopenService
 
 
 def make_canopen_msg(cid: int, data: bytes, is_extended: bool = False) -> CanopenMessage:

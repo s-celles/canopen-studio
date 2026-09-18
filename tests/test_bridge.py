@@ -6,7 +6,7 @@ import time
 import can
 import pytest
 
-from can_bridge import CanBridge
+from canopen_studio.bridge import CanBridge
 
 
 class FakeBus:

@@ -38,19 +38,19 @@ gui:
         STDCXX=$(find /nix/store -maxdepth 3 -name "libstdc++.so.6" -path "*/gcc-*-lib/lib/*" 2>/dev/null | head -1 | xargs -r dirname)
         [ -n "$STDCXX" ] && export LD_LIBRARY_PATH="${STDCXX}:${LD_LIBRARY_PATH:-}"
     fi
-    uv run python can_gui.py
+    uv run canopen-studio
 
 # Run sniffer on hardware (default: SLCAN at 500 kbps)
 sniff interface="slcan" bitrate="500000":
-    uv run python can_sniffer.py -I {{interface}} -b {{bitrate}}
+    uv run can-sniffer -I {{interface}} -b {{bitrate}}
 
 # Run sniffer in Virtual Simulation mode (no hardware required, ideal for study)
 simulate duration="10":
-    uv run python can_sniffer.py -I virtual --simulate -t {{duration}}
+    uv run can-sniffer -I virtual --simulate -t {{duration}}
 
 # Launch interactive real-time dashboard (RPM, Temperatures, Torque, Status)
 dashboard interface="slcan" bitrate="500000":
-    uv run python can_sniffer.py -I {{interface}} -b {{bitrate}} --dashboard
+    uv run can-sniffer -I {{interface}} -b {{bitrate}} --dashboard
 
 # Launch Tbruno25/can-explorer (real-time payload plotting tool)
 can-explorer:
@@ -58,27 +58,27 @@ can-explorer:
 
 # Monitor Extended (29-bit) frames only
 extended:
-    uv run python can_sniffer.py --extended-only
+    uv run can-sniffer --extended-only
 
 # Monitor Standard (11-bit) frames only
 standard:
-    uv run python can_sniffer.py --standard-only
+    uv run can-sniffer --standard-only
 
 # Filter for a specific CAN ID (e.g. just filter 0x473)
 filter can_id="0x473":
-    uv run python can_sniffer.py -i {{can_id}}
+    uv run can-sniffer -i {{can_id}}
 
 # Record CAN frames to CSV log file (e.g. just record my_log.csv)
 record filename="capture_sevcon.csv":
-    uv run python can_sniffer.py -o {{filename}}
+    uv run can-sniffer -o {{filename}}
 
 # Passive listen-only mode (no ACK frames transmitted on bus)
 listen-only:
-    uv run python can_sniffer.py --listen-only
+    uv run can-sniffer --listen-only
 
 # Capture a fixed number of frames and stop (e.g. just sample 50)
 sample count="20":
-    uv run python can_sniffer.py -c {{count}}
+    uv run can-sniffer -c {{count}}
 
 # Build static documentation site with MkDocs Material
 doc-build:

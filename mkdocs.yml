@@ -48,5 +48,6 @@ nav:
   - Telemetry & Oscilloscope: telemetry.md
   - Transmission Console: transmission.md
   - SDO & NMT Master: sdo_nmt.md
+  - AI Integration (MCP & A2A): ai_integration.md
   - Screenshots Gallery: gallery.md
   - In-App Updates: updates.md

@@ -63,7 +63,7 @@ if (-not (Test-Path $VenvPythonw)) {
     # Fallback to standard python.exe if pythonw is missing
     $VenvPythonw = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 }
-$GuiScript = Join-Path $ProjectRoot "can_gui.py"
+$GuiScript = Join-Path $ProjectRoot "src\canopen_studio\gui.py"
 
 # Function to create Windows shortcut (.lnk)
 function Create-Shortcut {

@@ -3,7 +3,12 @@
 ; License: GPL-3.0-or-later
 
 #define MyAppName "CAN & CANopen Studio"
-#define MyAppVersion "0.2.1"
+; The version comes from the package (src/canopen_studio/__init__.py) and is passed by the
+; release workflow as /DMyAppVersion=x.y.z. The fallback is deliberately not a real release,
+; so an installer built without it is obvious.
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "Sébastien Celles"
 #define MyAppURL "https://github.com/s-celles/canopen-studio"
 #define MyAppExeName "CANopen-Studio.exe"

@@ -20,6 +20,8 @@ Initially created for electric kart telemetry (SEVCON Gen4 inverter & De Haardt 
 - **Network Node Monitor & Gauges**: Live visual tracking of node NMT states (Operational, Pre-Operational, Stopped), message counters, and real-time RPM / torque dials.
 - **Full Transmission Console**: Generic NMT Master controller, high-precision SYNC clock pulse generator (50 Hz), arbitrary frame transmitter, and pre-configured frame templates library.
 - **SDO Object Dictionary Explorer**: Expedited dictionary reader and writer for inspecting and calibrating any CANopen node.
+- **AI Agent Integration**: Built-in MCP and A2A servers let an AI agent read the live trace, inspect nodes and telemetry, transmit frames, drive the NMT state machine and control the network bridge.
+- **Real Bus Network Bridge**: Mirror a physical CAN bus — a drive, an inverter, a live harness — onto a UDP multicast group so remote machines observe the real traffic as if they were wired to it.
 - **Integrated In-App Updater**: Automated background checks against GitHub Releases, direct 1-click Windows installer upgrade, and Git update automation.
 
 ---
@@ -28,6 +30,7 @@ Initially created for electric kart telemetry (SEVCON Gen4 inverter & De Haardt 
 
 - [Installation Guide](installation.md) - Download standalone `.exe` setup, 1-click script, or Python CLI.
 - [Quick Start](quickstart.md) - Connect hardware or launch the virtual simulator in seconds.
+- [AI Integration](ai_integration.md) - Drive the bus from an AI agent over MCP or A2A.
 - [Hardware & Interfaces](hardware.md) - Supported USB-to-CAN converters and drivers.
 - [Protocol Decoders](decoders.md) - How to decode custom CAN packets and devices.
 - [Screenshots Gallery](gallery.md) - Tour the graphical studio interface.

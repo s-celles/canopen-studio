@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-09-18
 
 ### Added
 - CAN <-> network bridge (`can_bridge.py`): mirrors the bus currently captured — typically a physical adapter connected to a real device — onto a UDP multicast group, so remote machines observe the live traffic as if they were wired to it. Available from the GUI toolbar (**Bridge → Net**) and from the MCP/A2A `bridge_start` / `bridge_stop` tools, with bridge counters reported by `get_status`.
@@ -14,15 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable UDP multicast hop limit (TTL) via the `CANOPEN_UDP_HOP_LIMIT` environment variable or the `hop_limit` argument of `open_can_bus()` and the MCP/A2A `connect` tool, allowing the virtual CAN bus to reach machines on other subnets (python-can defaults to 1, confining frames to the local segment).
 - MCP/A2A status now reports the active `channel` and `bitrate` alongside the interface, so remote clients can join the same bus.
 - Unit tests for the MCP server tools (`tests/test_mcp_server.py`), the GUI status snapshot (`tests/test_gui_status.py`) and the UDP multicast bus configuration.
+- MCP server (`can_mcp_server.py`) and A2A server (`can_a2a_server.py`) started automatically by the GUI in daemon threads, exposing the bus to AI agents: connection management, trace and network state reading, raw frame transmission, NMT commands, SYNC generation and SDO reads.
+- Multi-instance support: `CANOPEN_STUDIO_INSTANCE` names an instance in the window title and status reports, while `MCP_PORT` and `A2A_PORT` let several instances run side by side.
+- UDP Multicast interface (CAN over IP) with an attachable simulator, turning any local network into a shared virtual CAN bus.
+- NixOS support: `shell.nix`, automatic `LD_LIBRARY_PATH` setup for `libstdc++` in `just gui`, and a venv setup handling tkinter and binary wheels.
+- Static analysis and security scanning in CI (mypy, bandit, safety, pre-commit), and a release pipeline building standalone binaries for macOS and Linux alongside Windows.
 
 ### Fixed
 - Corrected the `claude mcp add` command shown in `can_mcp_server.py` (docstring and standalone startup message): the server name must precede the URL.
 - `get_status` reported the interface selected in the combobox instead of the one actually connected, so a bus opened from MCP/A2A was misreported (e.g. `slcan` while running on `udp_multicast`).
 - Frames sent through MCP/A2A (`send_frame`, `send_nmt`, `send_sync`, `sdo_read`) were not counted in the `total_tx` statistic, unlike frames sent from the GUI transmission console.
 - Removed an unused `tkinter` import in `connect_from_mcp` flagged by Ruff (F401).
+- The virtual simulator now transmits on a separate `sim_bus` when running on a network interface: `udp_multicast` cannot receive its own messages, so simulated frames never reached the capture loop.
+- Added the `msgpack` dependency required by the UDP Multicast backend, which failed to open without it.
+- `VirtualCanopenSimulator.running` is initialised in `__init__`, avoiding an attribute error when stopping a simulator that was never started.
+- Corrected `bandit` scanning the `.venv` directory in CI.
+- The in-app git updater located the checkout from its own directory, which broke once the code moved under `src/`; it now walks up to find the repository root and reports clearly when running outside a checkout.
 
 ### Changed
+- **Breaking (source layout)**: the Python code moved to a `src/canopen_studio/` package. Modules were renamed (`can_gui` -> `canopen_studio.gui`, `can_interfaces` -> `canopen_studio.interfaces`, `can_bridge` -> `canopen_studio.bridge`, `can_mcp_server` -> `canopen_studio.mcp_server`, `can_a2a_server` -> `canopen_studio.a2a_server`, `can_sniffer` -> `canopen_studio.sniffer`, `updater` -> `canopen_studio.updater`, `canopen_stack` -> `canopen_studio.stack`). Console entry points (`canopen-studio`, `can-sniffer`, `canopen-mcp`, `canopen-a2a`) are unchanged.
+- The version is declared once in `src/canopen_studio/__init__.py`; `pyproject.toml` reads it as dynamic metadata, the modules import it, and the Windows installer receives it from the release workflow.
+- Documented the AI integration (MCP and A2A) on a dedicated page, covering the tool reference, bridge control from an agent, multi-instance ports and the absence of authentication.
 - Applied `ruff format` to `can_gui.py`, `can_mcp_server.py` and `can_a2a_server.py`, which were failing the CI formatting check.
+- Made the `justfile` fully cross-platform.
+- Documented UDP Multicast, the virtual simulator and the network impact of multicast versus broadcast.
 
 ## [0.2.1] - 2026-09-18
 

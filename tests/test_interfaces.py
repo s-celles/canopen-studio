@@ -4,8 +4,8 @@ Unit tests for CAN interface configuration and Virtual CANopen Simulator.
 
 import time
 import can
-import can_interfaces
-from can_interfaces import (
+from canopen_studio import interfaces
+from canopen_studio.interfaces import (
     SUPPORTED_INTERFACES,
     STANDARD_BITRATES,
     VirtualCanopenSimulator,
@@ -104,47 +104,47 @@ class TestUdpMulticastBus:
     def test_default_hop_limit_stays_on_local_segment(self, monkeypatch):
         """Without configuration the bus keeps python-can's link-local hop limit of 1."""
         captured = {}
-        monkeypatch.setattr(can_interfaces.can, "Bus", lambda **kw: captured.update(kw))
+        monkeypatch.setattr(interfaces.can, "Bus", lambda **kw: captured.update(kw))
         monkeypatch.delenv("CANOPEN_UDP_HOP_LIMIT", raising=False)
 
-        can_interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0)
+        interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0)
 
         assert captured["hop_limit"] == 1
 
     def test_hop_limit_argument_crosses_routers(self, monkeypatch):
         """An explicit hop limit is forwarded so frames can reach other subnets."""
         captured = {}
-        monkeypatch.setattr(can_interfaces.can, "Bus", lambda **kw: captured.update(kw))
+        monkeypatch.setattr(interfaces.can, "Bus", lambda **kw: captured.update(kw))
 
-        can_interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0, hop_limit=8)
+        interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0, hop_limit=8)
 
         assert captured["hop_limit"] == 8
 
     def test_hop_limit_from_environment(self, monkeypatch):
         """CANOPEN_UDP_HOP_LIMIT configures the hop limit without touching the code."""
         captured = {}
-        monkeypatch.setattr(can_interfaces.can, "Bus", lambda **kw: captured.update(kw))
+        monkeypatch.setattr(interfaces.can, "Bus", lambda **kw: captured.update(kw))
         monkeypatch.setenv("CANOPEN_UDP_HOP_LIMIT", "16")
 
-        can_interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0)
+        interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0)
 
         assert captured["hop_limit"] == 16
 
     def test_explicit_argument_overrides_environment(self, monkeypatch):
         """An explicit argument wins over the environment variable."""
         captured = {}
-        monkeypatch.setattr(can_interfaces.can, "Bus", lambda **kw: captured.update(kw))
+        monkeypatch.setattr(interfaces.can, "Bus", lambda **kw: captured.update(kw))
         monkeypatch.setenv("CANOPEN_UDP_HOP_LIMIT", "16")
 
-        can_interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0, hop_limit=2)
+        interfaces.open_can_bus("udp_multicast", "239.0.0.1", 0, hop_limit=2)
 
         assert captured["hop_limit"] == 2
 
     def test_hop_limit_not_sent_to_other_backends(self, monkeypatch):
         """Serial and kernel backends must not receive a multicast-only keyword."""
         captured = {}
-        monkeypatch.setattr(can_interfaces.can, "Bus", lambda **kw: captured.update(kw))
+        monkeypatch.setattr(interfaces.can, "Bus", lambda **kw: captured.update(kw))
 
-        can_interfaces.open_can_bus("slcan", "/dev/ttyUSB0", 500000, hop_limit=8)
+        interfaces.open_can_bus("slcan", "/dev/ttyUSB0", 500000, hop_limit=8)
 
         assert "hop_limit" not in captured

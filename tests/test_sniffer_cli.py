@@ -2,7 +2,7 @@
 Unit tests for CAN sniffer CLI parsing and filtering.
 """
 
-from can_sniffer import parse_args
+from canopen_studio.sniffer import parse_args
 
 
 class TestSnifferCliArgs:

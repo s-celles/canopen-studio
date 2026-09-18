@@ -1,6 +1,6 @@
 """
 CAN / CANopen sniffer and analyzer for SEVCON Gen4 motor controller.
-Uses the modular canopen_stack abstraction layer and extensible decoder registry.
+Uses the modular canopen_studio.stack abstraction layer and extensible decoder registry.
 
 Author: Sébastien Celles
 License: GNU General Public License v3.0 (GPL-3.0-or-later)
@@ -14,11 +14,12 @@ import csv
 from typing import Optional
 
 
-from canopen_stack import (
+from canopen_studio import __version__
+from canopen_studio.stack import (
     CANopenLayer,
     get_default_registry,
 )
-from can_interfaces import (
+from canopen_studio.interfaces import (
     SUPPORTED_INTERFACES,
     STANDARD_BITRATES,
     list_com_ports,
@@ -264,7 +265,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version="canopen-studio 0.2.1 - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
+        version=f"canopen-studio {__version__} - Copyright (C) 2026 Sébastien Celles (GPL-3.0-or-later)",
     )
     parser.add_argument(
         "-I",

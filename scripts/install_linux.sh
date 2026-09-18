@@ -61,7 +61,7 @@ cat << LAUNCHER > "$LAUNCHER_SCRIPT"
 #!/usr/bin/env bash
 export PATH="\$HOME/.cargo/bin:\$HOME/.local/bin:\$PATH"
 cd "$PROJECT_ROOT"
-exec uv run can_gui.py
+exec uv run canopen-studio
 LAUNCHER
 chmod +x "$LAUNCHER_SCRIPT"
 

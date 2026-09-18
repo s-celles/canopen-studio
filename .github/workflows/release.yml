@@ -77,7 +77,9 @@ jobs:
             Write-Error "ISCC.exe was not found."
             exit 1
           }
-          & $iscc installer/CANopenStudio.iss
+          $version = (uv run python -c "import canopen_studio; print(canopen_studio.__version__)").Trim()
+          Write-Host "Building installer for version $version"
+          & $iscc /DMyAppVersion=$version installer/CANopenStudio.iss
 
       - name: Publish GitHub Release Assets
         uses: softprops/action-gh-release@v3

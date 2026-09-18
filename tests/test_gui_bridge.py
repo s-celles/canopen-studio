@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("tkinter", reason="GUI module requires the tkinter bindings")
 
-from can_gui import CanStudioApp  # noqa: E402
+from canopen_studio.gui import CanStudioApp  # noqa: E402
 
 
 class RecordingBridge:
@@ -109,7 +109,7 @@ def opened(monkeypatch):
         calls.append({"interface": interface, "channel": channel, "hop_limit": hop_limit})
         return FakeNetworkBus()
 
-    monkeypatch.setattr("can_gui.open_can_bus", fake_open)
+    monkeypatch.setattr("canopen_studio.gui.open_can_bus", fake_open)
     return calls
 
 
