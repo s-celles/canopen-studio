@@ -46,6 +46,14 @@ By selecting the **UDP Multicast** interface, you can route CAN frames over your
 - **Virtual Bus**: All instances of CAN & CANopen Studio (or other Python-CAN clients) on the same local network that connect to the exact same Multicast IP Address will act as if they are physically wired to the same CAN bus.
 - **Isolation**: You can create multiple isolated virtual buses simultaneously by simply using different Multicast IPs (e.g., `239.0.0.1` and `239.0.0.2`).
 
+
+### Network Impact & Security (Multicast vs. Broadcast)
+It is common to wonder if injecting raw CAN bus traffic over an IP network will cause network congestion or "pollution". The risk is practically non-existent thanks to the choice of **UDP Multicast**:
+
+- **Multicast is Smart (IGMP Snooping):** Unlike *Broadcast* messages (which are forced onto every device on the network), Multicast acts as an opt-in subscription. Modern network switches use IGMP to route these packets **only** to the specific computers that are currently running CANopen Studio and listening to that specific IP. Your printers, phones, and colleagues' computers will not receive this traffic.
+- **Negligible Bandwidth:** A physical CAN bus loaded at 100% (500 kbit/s) generates less than 100 KB/s of network traffic. On a standard 1 Gigabit office network, this represents less than 0.1% of the available bandwidth.
+- **Local Scope:** Multicast packets remain strictly on your local subnet (LAN). They are not routed out to the external internet.
+
 ### Simulating a CANopen Node
 CANopen Studio includes a built-in virtual node that generates telemetry (Heartbeats, SYNC pulses, CiA 402/SEVCON PDOs, and SDO responses).
 - **In the GUI**: Simply check the **"Simulate"** checkbox next to the Channel selector before clicking Connect. This will inject the simulated traffic directly onto the active bus (whether it's a physical USB interface, SocketCAN, or a UDP Multicast IP).
