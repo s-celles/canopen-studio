@@ -32,6 +32,12 @@ check:
 
 # Launch full graphical studio (Network Monitor, Reverse Plotter, Trace, Transmit, SDO Explorer)
 gui:
+    #!/usr/bin/env bash
+    # NixOS: binary wheels (numpy, matplotlib) require libstdc++.so.6 from gcc-lib
+    if command -v nix-store &>/dev/null; then
+        STDCXX=$(find /nix/store -maxdepth 3 -name "libstdc++.so.6" -path "*/gcc-*-lib/lib/*" 2>/dev/null | head -1 | xargs -r dirname)
+        [ -n "$STDCXX" ] && export LD_LIBRARY_PATH="${STDCXX}:${LD_LIBRARY_PATH:-}"
+    fi
     uv run python can_gui.py
 
 # Run sniffer on hardware (default: SLCAN at 500 kbps)
