@@ -31,8 +31,10 @@ from canopen_stack import CANopenLayer, get_default_registry
 if TYPE_CHECKING:
     pass
 
+import os as _os
+
 A2A_HOST = "localhost"
-A2A_PORT = 8765
+A2A_PORT = int(_os.environ.get("A2A_PORT", 8765))
 
 # ---------------------------------------------------------------------------
 # Shared state — same pattern as can_mcp_server.py

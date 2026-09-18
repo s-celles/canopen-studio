@@ -173,7 +173,11 @@ FRAME_TEMPLATES = {
 class CanStudioApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("CAN & CANopen Studio - Universal Protocol Analyzer & Transmit Station")
+        self.instance_name: str = os.environ.get("CANOPEN_STUDIO_INSTANCE", "")
+        _title = "CAN & CANopen Studio - Universal Protocol Analyzer & Transmit Station"
+        if self.instance_name:
+            _title = f"[{self.instance_name}] {_title}"
+        self.title(_title)
         self.geometry("1150x800")
         self.minsize(960, 680)
 
@@ -374,9 +378,12 @@ class CanStudioApp(tk.Tk):
         self.status_bar = ttk.Frame(self, relief=tk.SUNKEN, padding=(6, 3))
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
+        _version_text = f"CAN & CANopen Studio v{CURRENT_VERSION}"
+        if self.instance_name:
+            _version_text = f"[{self.instance_name}]  {_version_text}"
         self.status_version_lbl = ttk.Label(
             self.status_bar,
-            text=f"CAN & CANopen Studio v{CURRENT_VERSION}",
+            text=_version_text,
             font=("Segoe UI", 9),
         )
         self.status_version_lbl.pack(side=tk.LEFT, padx=5)
@@ -1271,9 +1278,10 @@ class CanStudioApp(tk.Tk):
     def get_status_dict(self) -> Dict[str, Any]:
         iface_key = self._get_selected_iface_key() if hasattr(self, "_get_selected_iface_key") else "unknown"
         return {
+            "instance": self.instance_name or "default",
             "connected": self.bus is not None,
             "interface": iface_key,
-            "simulate": getattr(self, "simulate_var", None) and self.simulate_var.get(),
+            "simulate": self.simulator is not None,
             "stats": dict(self.stats),
             "message": "Connected" if self.bus else "Not connected — call connect() first",
         }
@@ -1316,11 +1324,14 @@ class CanStudioApp(tk.Tk):
             self.running = True
             self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
             self.rx_thread.start()
-            # Update GUI status on the main thread
-            self.after(0, lambda: self.status_lbl.configure(
-                text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
+            # Update GUI on the main thread (status bar + refresh loop)
+            self.after(0, lambda: (
+                self.status_lbl.configure(
+                    text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
+                ),
+                self.btn_connect.configure(text="Disconnect"),
+                self._update_gui_loop(),
             ))
-            self.after(0, lambda: self.btn_connect.configure(text="Disconnect"))
             return f"Connected to {interface} [{channel}]" + (" + simulator" if simulate else "")
         except Exception as exc:
             return f"Connection failed: {exc}"

@@ -26,8 +26,10 @@ from canopen_stack import CANopenLayer, get_default_registry
 if TYPE_CHECKING:
     pass
 
+import os as _os
+
 MCP_HOST = "localhost"
-MCP_PORT = 3001
+MCP_PORT = int(_os.environ.get("MCP_PORT", 3001))
 
 mcp = FastMCP(
     "CANopen Studio",
