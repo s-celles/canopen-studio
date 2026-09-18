@@ -38,8 +38,22 @@ jobs:
         run: choco install innosetup --no-progress
 
       - name: Compile Inno Setup Installer
+        shell: powershell
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/CANopenStudio.iss
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
+          if (-not $iscc) {
+            if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+              $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            } elseif (Test-Path "C:\Program Files\Inno Setup 6\ISCC.exe") {
+              $iscc = "C:\Program Files\Inno Setup 6\ISCC.exe"
+            }
+          }
+          if (-not $iscc) {
+            Write-Error "ISCC.exe (Inno Setup Compiler) was not found."
+            exit 1
+          }
+          Write-Host "Compiling installer using: $iscc"
+          & $iscc installer/CANopenStudio.iss
 
       - name: Create Portable Zip
         run: |
