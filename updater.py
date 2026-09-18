@@ -12,6 +12,7 @@ import sys
 import json
 import subprocess
 import urllib.request
+import urllib.error
 from typing import Tuple, Optional, Dict, Any, Callable
 
 CURRENT_VERSION = "0.2.0"
@@ -67,8 +68,52 @@ def check_for_updates(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            if err.code == 404:
+                # 'releases/latest' returns 404 if no non-draft/prerelease releases exist.
+                # Check the general releases list to see if any release exists.
+                list_url = f"https://api.github.com/repos/{repo}/releases"
+                list_req = urllib.request.Request(
+                    list_url,
+                    headers={
+                        "User-Agent": f"CANopen-Studio-Updater/{current_version}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                )
+                try:
+                    with urllib.request.urlopen(list_req, timeout=timeout) as list_resp:
+                        releases_list = json.loads(list_resp.read().decode("utf-8"))
+                        if releases_list and len(releases_list) > 0:
+                            payload = releases_list[0]
+                        else:
+                            return False, {
+                                "tag_name": f"v{current_version}",
+                                "no_releases": True,
+                                "name": "No releases yet",
+                                "body": "No releases have been published yet for this repository.",
+                                "html_url": f"https://github.com/{repo}/releases",
+                            }
+                except Exception:
+                    return False, {
+                        "tag_name": f"v{current_version}",
+                        "no_releases": True,
+                        "name": "No releases yet",
+                        "body": "No releases have been published yet for this repository.",
+                        "html_url": f"https://github.com/{repo}/releases",
+                    }
+            elif err.code == 403:
+                return False, {
+                    "tag_name": None,
+                    "rate_limited": True,
+                    "name": "Rate limited",
+                    "body": "GitHub API rate limit exceeded. Please try again later.",
+                    "html_url": f"https://github.com/{repo}/releases",
+                }
+            else:
+                return False, None
 
         tag = payload.get("tag_name", "")
         has_update = compare_versions(current_version, tag)

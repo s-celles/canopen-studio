@@ -85,6 +85,36 @@ class TestCheckForUpdates:
         assert available is False
         assert info is None
 
+    @patch("urllib.request.urlopen")
+    def test_http_404_no_releases_handled_gracefully(self, mock_urlopen):
+        import urllib.error
+
+        # First call (releases/latest) raises 404
+        # Second call (releases list) returns empty list b"[]"
+        resp_list = MagicMock()
+        resp_list.read.return_value = b"[]"
+        resp_list.__enter__.return_value = resp_list
+
+        err_404 = urllib.error.HTTPError("url", 404, "Not Found", {}, None)
+        mock_urlopen.side_effect = [err_404, resp_list]
+
+        available, info = check_for_updates(current_version="0.2.0")
+        assert available is False
+        assert info is not None
+        assert info.get("no_releases") is True
+
+    @patch("urllib.request.urlopen")
+    def test_http_403_rate_limit_handled_gracefully(self, mock_urlopen):
+        import urllib.error
+
+        err_403 = urllib.error.HTTPError("url", 403, "rate limit exceeded", {}, None)
+        mock_urlopen.side_effect = err_403
+
+        available, info = check_for_updates(current_version="0.2.0")
+        assert available is False
+        assert info is not None
+        assert info.get("rate_limited") is True
+
     def test_is_git_repo(self):
         # In current repo, .git exists
         assert is_git_repo() is True

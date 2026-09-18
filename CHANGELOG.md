@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Custom vector-styled application icons (`assets/icon.png` and `assets/icon.ico`) featuring CAN differential signal waveforms and network topology.
 - Package entry points in `pyproject.toml` (`canopen-studio` and `can-sniffer`) for global installation via `uv tool` or `pip`.
 - Justfile automation recipes for `test`, `lint`, `format`, `check`, `install`, `generate-icon`, `build-exe`, `build-portable`, `doc-build`, and `doc-serve`.
-- Comprehensive pytest unit test suite (32 tests) covering CANopen layer protocol state transitions, application decoders (SEVCON, CiA 402, De Haardt, J1939), hardware interface abstraction, virtual simulator loop, CLI argument parsing, and updater routines.
+- Comprehensive pytest unit test suite (34 tests) covering CANopen layer protocol state transitions, application decoders (SEVCON, CiA 402, De Haardt, J1939), hardware interface abstraction, virtual simulator loop, CLI argument parsing, and updater routines.
 - Integrated code quality and style linting with Ruff (`ruff check`, `ruff format`) configured in `pyproject.toml`.
 - Continuous Integration workflow (`.github/workflows/ci.yml`) testing across Python 3.10, 3.11, 3.12, 3.13 on both Ubuntu and Windows runners, with Ruff linting and formatting verification.
 - Automated dependency update configuration with Dependabot (`.github/dependabot.yml`) for both GitHub Actions and Python dependencies.

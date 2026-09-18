@@ -1789,6 +1789,28 @@ class CanStudioApp(tk.Tk):
                 details_txt.configure(state=tk.DISABLED)
                 return
 
+            if info.get("rate_limited"):
+                status_hdr.config(text="⚠️ GitHub API Rate Limit Exceeded")
+                details_txt.insert(
+                    tk.END,
+                    "GitHub API rate limit reached (60 requests/hour unauthenticated).\n"
+                    "Please wait a while before checking again, or visit the repository directly:\n"
+                    f"{info.get('html_url', f'https://github.com/{GITHUB_REPO}/releases')}\n",
+                )
+                details_txt.configure(state=tk.DISABLED)
+                return
+
+            if info.get("no_releases"):
+                status_hdr.config(text="ℹ️ No releases published yet")
+                details_txt.insert(
+                    tk.END,
+                    f"Current Version: v{CURRENT_VERSION}\n\n"
+                    "No releases have been published yet on GitHub for this repository.\n"
+                    f"Repository: {info.get('html_url', f'https://github.com/{GITHUB_REPO}/releases')}\n",
+                )
+                details_txt.configure(state=tk.DISABLED)
+                return
+
             tag = info.get("tag_name", "v0.0.0")
             if has_update:
                 status_hdr.config(text=f"✨ Update Available: {tag}!")
