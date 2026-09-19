@@ -48,6 +48,7 @@ from tkinter import ttk, messagebox, filedialog
 
 import can
 from canopen_studio.bridge import CanBridge
+from canopen_studio.latency import LatencyTracker
 from canopen_studio.diag import DiagnosticError, DiagnosticWriteRefused, WriteGate, clear_trouble_codes
 from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
 from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
@@ -237,6 +238,9 @@ class CanStudioApp(tk.Tk):
         self.tx_periodic_timer = None
         self.sync_generator_timer = None
         self.heartbeat_generator_timer = None
+        self.periodic_ping_timer = None
+        self.latency_tracker = LatencyTracker()
+        self.auto_echo_var = tk.BooleanVar(value=True)
 
         # Statistics & Node Discovery
         self.stats = {
@@ -507,6 +511,11 @@ class CanStudioApp(tk.Tk):
 
         self.lbl_total_tx = ttk.Label(stat_frame, text="Total Transmitted: 0", font=("Segoe UI", 10))
         self.lbl_total_tx.pack(side=tk.LEFT, padx=15)
+
+        self.lbl_latency = ttk.Label(
+            stat_frame, text="RTT: -- ms | Jitter: --", font=("Segoe UI", 10, "bold"), foreground="#17a2b8"
+        )
+        self.lbl_latency.pack(side=tk.LEFT, padx=15)
 
         self.lbl_nodes_cnt = ttk.Label(
             stat_frame, text="Active Nodes: 0", font=("Segoe UI", 10, "bold"), foreground="green"
@@ -1691,6 +1700,67 @@ class CanStudioApp(tk.Tk):
         )
         self.lbl_hw_info.pack(fill=tk.X, pady=6)
 
+        # Network & Bus Latency / Jitter Monitor
+        lat_box = ttk.LabelFrame(
+            box_hw, text=" ⏱️ Bus Latency & Jitter Measurement (CAN Ping & Echo) ", padding=10
+        )
+        lat_box.pack(fill=tk.X, pady=8)
+
+        lat_btn_row = ttk.Frame(lat_box)
+        lat_btn_row.pack(fill=tk.X, pady=4)
+
+        self.btn_ping_once = ttk.Button(
+            lat_btn_row, text="🎯 Ping Network (0x7E0)", command=self._send_ping_once
+        )
+        self.btn_ping_once.pack(side=tk.LEFT, padx=4)
+
+        self.btn_periodic_ping = ttk.Button(
+            lat_btn_row, text="⏱️ Start Periodic Ping (1 Hz)", command=self._toggle_periodic_ping
+        )
+        self.btn_periodic_ping.pack(side=tk.LEFT, padx=4)
+
+        self.chk_auto_echo = ttk.Checkbutton(
+            lat_btn_row,
+            text="Auto-Echo Responder (Reply 0x7E1)",
+            variable=self.auto_echo_var,
+            command=self._on_auto_echo_changed,
+        )
+        self.chk_auto_echo.pack(side=tk.LEFT, padx=12)
+
+        ttk.Button(
+            lat_btn_row, text="Reset Stats", command=self._reset_latency_stats
+        ).pack(side=tk.RIGHT, padx=4)
+
+        # Latency Metrics Row 1: RTT & Packet Loss
+        lat_info_row1 = ttk.Frame(lat_box)
+        lat_info_row1.pack(fill=tk.X, pady=4)
+        self.lbl_rtt_stats = ttk.Label(
+            lat_info_row1,
+            text="RTT Last: -- ms  |  Avg: -- ms  |  Min/Max: -- / -- ms",
+            font=("Consolas", 10, "bold"),
+            foreground="#007acc",
+        )
+        self.lbl_rtt_stats.pack(side=tk.LEFT, padx=4)
+
+        self.lbl_loss_stats = ttk.Label(
+            lat_info_row1,
+            text="Loss: 0.0% (0 sent, 0 recv)",
+            font=("Consolas", 10),
+            foreground="#555555",
+        )
+        self.lbl_loss_stats.pack(side=tk.RIGHT, padx=4)
+
+        # Latency Metrics Row 2: Periodic SYNC Jitter
+        lat_info_row2 = ttk.Frame(lat_box)
+        lat_info_row2.pack(fill=tk.X, pady=2)
+        self.lbl_jitter_stats = ttk.Label(
+            lat_info_row2,
+            text="SYNC 0x080 (nominal 20 ms): Interval: -- ms  |  Jitter: ±-- ms (Avg: ±-- ms)",
+            font=("Consolas", 10),
+            foreground="#28a745",
+        )
+        self.lbl_jitter_stats.pack(side=tk.LEFT, padx=4)
+
         slcan_box = ttk.LabelFrame(
             box_hw, text=" LAWICEL / SLCAN ASCII Hardware Commands (for CANUSB, USBtin, CANable) ", padding=10
         )
@@ -1744,6 +1814,52 @@ class CanStudioApp(tk.Tk):
             )
         except Exception as e:
             self.slcan_resp_lbl.configure(text=f"Command Error: {e}", foreground="red")
+
+    # =========================================================================
+    # Latency & Jitter Measurement Handlers
+    # =========================================================================
+    def _send_ping_once(self):
+        if not self.bus or not self.running:
+            messagebox.showinfo("Latency Ping", "Please connect to a bus first.")
+            return
+        seq = self.latency_tracker.send_ping(self.bus)
+        if seq is not None:
+            self.stats["total_tx"] += 1
+
+    def _toggle_periodic_ping(self):
+        if self.periodic_ping_timer:
+            self.after_cancel(self.periodic_ping_timer)
+            self.periodic_ping_timer = None
+            self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+        else:
+            if not self.bus or not self.running:
+                messagebox.showinfo("Periodic Ping", "Please connect to a bus first.")
+                return
+            self.btn_periodic_ping.configure(text="⏹️ Stop Periodic Ping")
+            self._periodic_ping_tick()
+
+    def _periodic_ping_tick(self):
+        if not self.running or not self.bus:
+            if self.periodic_ping_timer:
+                self.after_cancel(self.periodic_ping_timer)
+                self.periodic_ping_timer = None
+                self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+            return
+        self._send_ping_once()
+        self.periodic_ping_timer = self.after(1000, self._periodic_ping_tick)
+
+    def _on_auto_echo_changed(self):
+        self.latency_tracker.auto_echo = self.auto_echo_var.get()
+
+    def _reset_latency_stats(self):
+        self.latency_tracker.reset()
+        self.lbl_rtt_stats.configure(text="RTT Last: -- ms  |  Avg: -- ms  |  Min/Max: -- / -- ms")
+        self.lbl_loss_stats.configure(text="Loss: 0.0% (0 sent, 0 recv)")
+        self.lbl_jitter_stats.configure(
+            text="SYNC 0x080 (nominal 20 ms): Interval: -- ms  |  Jitter: ±-- ms (Avg: ±-- ms)"
+        )
+        if hasattr(self, "lbl_latency"):
+            self.lbl_latency.configure(text="RTT: -- ms | Jitter: --")
 
     # =========================================================================
     # TAB 7: Educational CANopen Reference
@@ -1830,7 +1946,8 @@ class CanStudioApp(tk.Tk):
             "channel": self.active_channel,
             "bitrate": self.active_bitrate,
             "simulate": self.simulator is not None,
-            "bridge": self.bridge.get_status() if self.bridge else None,
+            "bridge": self.bridge.get_status() if hasattr(self, "bridge") and self.bridge else None,
+            "latency": self.latency_tracker.get_stats() if hasattr(self, "latency_tracker") and self.latency_tracker else None,
             "stats": dict(self.stats),
             "message": "Connected" if connected else "Not connected — call connect() first",
         }
@@ -1989,6 +2106,14 @@ class CanStudioApp(tk.Tk):
             self.heartbeat_generator_timer = None
             self.btn_periodic_hb.configure(text="Start Heartbeat (1 Hz)")
 
+        if self.periodic_ping_timer:
+            self.after_cancel(self.periodic_ping_timer)
+            self.periodic_ping_timer = None
+            if hasattr(self, "btn_periodic_ping"):
+                self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+
+        self.latency_tracker.reset()
+
         # A native diagnostic session runs on this bus, so it cannot outlive it.
         self._obd_close_session()
 
@@ -2083,6 +2208,7 @@ class CanStudioApp(tk.Tk):
 
                 self._forward_to_bridge(msg)
                 self._forward_to_diagnostics(msg)
+                self.latency_tracker.process_message(msg, self.bus)
 
                 now = time.time()
                 elapsed = now - start_time
@@ -2175,7 +2301,9 @@ class CanStudioApp(tk.Tk):
                     )
 
             except Exception:
-                break
+                if not self.running:
+                    break
+                time.sleep(0.01)
 
     def _update_gui_loop(self):
         if not self.running:
@@ -2195,6 +2323,29 @@ class CanStudioApp(tk.Tk):
             self.lbl_total_rx.configure(text=f"Total Received: {self.stats['total_rx']}")
             self.lbl_total_tx.configure(text=f"Total Transmitted: {self.stats['total_tx']}")
             self.lbl_nodes_cnt.configure(text=f"Active Nodes: {len(self.discovered_nodes)}")
+
+            # Update Latency & Jitter metrics
+            lat = self.latency_tracker.get_stats()
+            rtt_txt = f"{lat['rtt_last_ms']:.1f}" if lat['rtt_last_ms'] is not None else "--"
+            jitter_txt = f"±{lat['sync_jitter_last_ms']:.1f}" if lat['sync_jitter_last_ms'] is not None else "--"
+            if hasattr(self, "lbl_latency"):
+                self.lbl_latency.configure(text=f"RTT: {rtt_txt} ms | Jitter: {jitter_txt} ms")
+
+            if hasattr(self, "lbl_rtt_stats"):
+                rtt_avg = f"{lat['rtt_avg_ms']:.1f}" if lat['rtt_avg_ms'] is not None else "--"
+                rtt_min = f"{lat['rtt_min_ms']:.1f}" if lat['rtt_min_ms'] is not None else "--"
+                rtt_max = f"{lat['rtt_max_ms']:.1f}" if lat['rtt_max_ms'] is not None else "--"
+                self.lbl_rtt_stats.configure(
+                    text=f"RTT Last: {rtt_txt} ms  |  Avg: {rtt_avg} ms  |  Min/Max: {rtt_min} / {rtt_max} ms"
+                )
+                self.lbl_loss_stats.configure(
+                    text=f"Loss: {lat['loss_rate_pct']}% ({lat['pings_sent']} sent, {lat['pings_received']} recv)"
+                )
+                sync_int = f"{lat['sync_interval_last_ms']:.1f}" if lat['sync_interval_last_ms'] is not None else "--"
+                jit_avg = f"±{lat['sync_jitter_avg_ms']:.1f}" if lat['sync_jitter_avg_ms'] is not None else "--"
+                self.lbl_jitter_stats.configure(
+                    text=f"SYNC 0x080 (nominal 20 ms): Interval: {sync_int} ms  |  Jitter: {jitter_txt} ms (Avg: {jit_avg} ms)"
+                )
 
             # Update Node Treeview table
             self.node_tree.delete(*self.node_tree.get_children())

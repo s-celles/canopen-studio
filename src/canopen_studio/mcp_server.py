@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 import can
@@ -170,6 +171,48 @@ def get_status() -> dict:
         "mode": "standalone",
         "stats": {"total_tx": _standalone_tx_count},
         "message": "Connected (standalone MCP server)" if connected else "Not connected — call connect() first",
+    }
+
+
+@mcp.tool()
+def get_latency_stats() -> dict:
+    """Return the current CAN bus latency (RTT min/avg/max) and SYNC jitter statistics."""
+    if _app_ref is not None:
+        return _app_ref.latency_tracker.get_stats()
+    return {"error": "Latency tracker is only available in integrated GUI mode"}
+
+
+@mcp.tool()
+def ping_bus(timeout: float = 1.0) -> dict:
+    """Send a CAN ping request frame (0x7E0) on the bus and measure Round-Trip Time (RTT).
+
+    Args:
+        timeout: Maximum seconds to wait for an echo response (0x7E1).
+    """
+    if _app_ref is None or not _app_ref.bus or not _app_ref.running:
+        return {"error": "Not connected — connect to a bus first"}
+
+    seq = _app_ref.latency_tracker.send_ping(_app_ref.bus)
+    if seq is None:
+        return {"error": "Failed to transmit ping frame"}
+    _app_ref.stats["total_tx"] += 1
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if seq not in _app_ref.latency_tracker._pending_pings:
+            return {
+                "success": True,
+                "sequence": seq,
+                "rtt_ms": _app_ref.latency_tracker.rtt_last_ms,
+                "stats": _app_ref.latency_tracker.get_stats(),
+            }
+        time.sleep(0.01)
+
+    return {
+        "success": False,
+        "sequence": seq,
+        "error": f"Timeout ({timeout}s) waiting for ping reply from bus",
+        "stats": _app_ref.latency_tracker.get_stats(),
     }
 
 

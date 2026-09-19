@@ -183,6 +183,17 @@ def open_can_bus(
 
     if backend == "udp_multicast":
         kwargs["hop_limit"] = resolve_udp_hop_limit(hop_limit)
+        # Support "IP:PORT" syntax (e.g. 224.0.0.1:1750) or CANOPEN_UDP_PORT env var
+        if isinstance(chan, str) and ":" in chan:
+            ip_part, port_part = chan.rsplit(":", 1)
+            if port_part.isdigit():
+                kwargs["channel"] = ip_part.strip()
+                kwargs["port"] = int(port_part.strip())
+        elif "CANOPEN_UDP_PORT" in os.environ:
+            try:
+                kwargs["port"] = int(os.environ["CANOPEN_UDP_PORT"])
+            except ValueError:
+                pass
 
     return can.Bus(**kwargs)
 
