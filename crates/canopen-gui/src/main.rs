@@ -1,10 +1,9 @@
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use std::collections::VecDeque;
 use slint::Weak;
 use canopen_core::udp::UdpCanBus;
-use canopen_core::frame::CanFrame;
+use canopen_core::simulator_ext::spawn_udp_simulator;
 
 slint::include_modules!();
 
@@ -12,8 +11,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
     let ui_handle: Weak<MainWindow> = ui.as_weak();
 
+    // Start background simulation thread on Multicast so all local sniffers get it!
+    spawn_udp_simulator("224.0.0.1", 1750);
+
     thread::spawn(move || {
-        let bus = match UdpCanBus::new(1750, "127.0.0.1", 1750, false) {
+        let bus = match UdpCanBus::new(1750, "224.0.0.1", 1750, true) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("Failed to bind UdpCanBus: {:?}", e);
@@ -32,7 +34,6 @@ fn main() -> Result<(), slint::PlatformError> {
             match bus.recv() {
                 Ok((frame, _addr)) => {
                     trace_count += 1;
-                    
                     let id = frame.id;
                     let data = frame.payload();
                     let mut updated = false;
@@ -58,7 +59,6 @@ fn main() -> Result<(), slint::PlatformError> {
                         if rpm_history.len() > 800 {
                             rpm_history.pop_front();
                         }
-                        
                         updated = true;
                     }
 
@@ -67,20 +67,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         let nmt = last_nmt.clone();
                         let total_trace = trace_count;
                         
-                        // Generate SVG path for the Plotter (width: approx 800px, height: approx 300px inside view)
-                        // Max RPM we simulate is roughly 4000
                         let mut path = String::with_capacity(rpm_history.len() * 15);
                         let w = 800.0;
                         let h = 300.0;
                         let max_rpm = 4000.0;
                         
-                        let points_count = rpm_history.len();
                         for (i, &val) in rpm_history.iter().enumerate() {
                             let x = (i as f32 / 800.0) * w;
-                            // Clamp value
                             let v = if val < 0 { 0.0 } else if val as f32 > max_rpm { max_rpm } else { val as f32 };
                             let y = h - ((v / max_rpm) * h);
-                            
                             if i == 0 {
                                 path.push_str(&format!("M {} {} ", x, y));
                             } else {
@@ -98,9 +93,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         });
                     }
                 }
-                Err(_) => {
-                    // Timeout or error, just loop
-                }
+                Err(_) => {}
             }
         }
     });

@@ -45,6 +45,7 @@ impl UdpCanBus {
             let _ = sock.set_reuse_port(true);
         }
         sock.set_broadcast(true)?;
+        sock.set_multicast_loop_v4(true)?;
         sock.set_nonblocking(false)?;
 
         let bind_addr: SocketAddr = format!("0.0.0.0:{}", bind_port)
