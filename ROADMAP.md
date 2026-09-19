@@ -7,13 +7,14 @@ This document outlines the strategic engineering roadmap for **CANopen Studio**.
 ## 🎯 Executive Summary & Strategic Priorities
 
 1. **High-Performance Core Engine (Preferred: Rust)**: Addressing architectural bottlenecks identified in the [baseline benchmarks](benchmarks.md) (Python GIL contention, heap allocation per frame, timer jitter) to achieve microsecond-level determinism and handle > 500,000 frames/sec.
-2. **Next-Generation Agentic AI Protocols**: Expanding beyond the existing **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** servers to natively support emerging agentic interaction standards (**AG-UI**, **A2UI**, and **Agent Control Protocol - ACP**).
-3. **Automotive & Industrial Protocol Expansions**: Adding CANopen FD, UDS (ISO 14229) over ISO-TP, and automated DBC/EDS-driven decoding.
+2. **Mobile Deployment (Android & iOS)**: Porting the application to mobile smartphones using a shared cross-platform compiled core, supporting Bluetooth Low Energy (BLE), Wi-Fi UDP, and USB OTG.
+3. **Next-Generation Agentic AI Protocols**: Expanding beyond the existing **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** servers to natively support emerging agentic interaction standards (**AG-UI**, **A2UI**, and **Agent Control Protocol - ACP**).
+4. **Automotive & Industrial Protocol Expansions**: Adding CANopen FD, UDS (ISO 14229) over ISO-TP, and automated DBC/EDS-driven decoding.
 
 ```mermaid
 flowchart TD
     subgraph Current["Current Architecture (Python 3.13)"]
-        A[Tkinter GUI] <--> B[Python Runtime + GIL]
+        A[Tkinter Desktop GUI] <--> B[Python Runtime + GIL]
         B <--> C[python-can / UdpBus]
         B <--> D["MCP Server (FastMCP SSE :3001)"]
         B <--> E["A2A Server (HTTP :8765)"]
@@ -24,20 +25,21 @@ flowchart TD
         R2["Zero-Copy Frame Processing"]
         R3["Lock-Free Ring Buffers"]
         R4["Hardware Timers (< 50 µs jitter)"]
-        R5["PyO3 / Maturin Bindings"]
+        R5["Cross-Compilation (x86_64, aarch64)"]
     end
 
-    subgraph Phase2["Phase 2: Next-Gen Agentic AI Protocols"]
+    subgraph Phase2["Phase 2: Next-Gen AI & Mobile Protocols"]
         P1["AG-UI (Agent-to-User Interface)"]
         P2["A2UI (Dynamic Widget Streaming)"]
         P3["ACP (Agent Control Protocol)"]
-        P4["MCP 2.0 Subscriptions & Push Events"]
+        P4["BLE & Mobile Network Transports"]
     end
 
-    subgraph Target["Target Architecture"]
-        T1["Native Rust Core Engine"]
-        T2["Multi-Protocol Agent Gateway (MCP / A2A / AG-UI / A2UI / ACP)"]
-        T3["Modern High-FPS GUI (Slint / egui / Tauri)"]
+    subgraph Target["Target Multi-Platform Architecture"]
+        T1["canopen-core (Rust Engine)"]
+        T2["Desktop: Linux / macOS / Windows"]
+        T3["Mobile: Android & iOS"]
+        T4["Agentic Gateway (MCP / A2A / AG-UI / A2UI / ACP)"]
     end
 
     Current --> Phase1
@@ -117,19 +119,94 @@ The roadmap extends this capabilities to emerging agentic interaction standards:
 
 ---
 
-## 3. Protocol & Hardware Expansions
+## 3. Mobile Deployment: Android & iOS Port
+
+A core strategic goal is enabling engineers, field technicians, and automotive diagnostics operators to run CANopen Studio directly on mobile devices (smartphones and tablets) without requiring a heavy workstation or laptop in the field.
+
+### 3.1. Cross-Platform Core Strategy (Rust on Mobile)
+Rather than maintaining separate native Android (Kotlin/Java) and iOS (Swift/Objective-C) protocol stacks:
+* **Single Core Engine (`canopen-core`)**: The compiled Rust engine is cross-compiled as a shared library:
+  - **Android**: Shared libraries (`.so`) compiled for `aarch64-linux-android`, `armv7-linux-androideabi`, and `x86_64-linux-android` via [`cargo-ndk`](https://github.com/bbqsrc/cargo-ndk).
+  - **iOS**: Universal static framework (`.xcframework`) compiled for `aarch64-apple-ios` and `aarch64-apple-ios-sim` via [`cargo-apple`](https://github.com/Timnn/cargo-apple) or `xcodebuild`.
+* **Zero Discrepancy**: 100% of the CAN protocol parsing, SDO/PDO state machines, OBD-II decoders, and ring buffer logic are shared across Desktop, Android, and iOS.
+
+### 3.2. Physical Connectivity & Platform Constraints
+
+Connecting a mobile phone to a physical CAN bus or OBD-II port presents platform-specific constraints:
+
+| Transport Layer | Android Support | iOS Support | Technical Details & Limitations |
+| :--- | :---: | :---: | :--- |
+| **Wi-Fi (UDP / TCP)** | ✅ Full | ✅ Full | Supported natively using the `UdpBus` architecture (broadcast `192.168.x.255` or unicast) or Wi-Fi OBD-II dongles (e.g. ELM327 Wi-Fi / STN1170 on TCP/UDP port 35000). Zero OS permission barriers on either platform. |
+| **Bluetooth Low Energy (BLE)** | ✅ Full | ✅ Full | Universal wireless connectivity. Utilizes GATT Nordic UART Service (NUS) or standard CAN-over-BLE characteristics. Works on iOS without Apple MFi hardware certification. |
+| **Bluetooth Classic (SPP / RFCOMM)** | ✅ Full | ❌ Restricted | Supported on Android for legacy ELM327 Bluetooth adapters. On iOS, Bluetooth Classic SPP requires proprietary Apple MFi (Made for iPhone) hardware coprocessor authentication. |
+| **USB Host / OTG (Wired)** | ✅ Full | ⚠️ Limited | Android supports direct USB OTG with CAN adapters (CANable / candleLight, USBtin, FTDI, CDC-ACM serial) via Android `UsbManager` in user-space (no root required). iOS requires Lightning/USB-C CCID/UAC adapters with specific external accessory entitlements. |
+
+```mermaid
+flowchart LR
+    subgraph MobileDevice["Mobile Device (Android / iOS)"]
+        UI["Mobile UI (Slint / Tauri / Flutter)"]
+        Core["canopen-core (Rust Engine)"]
+        UI <--> Core
+    end
+
+    subgraph WirelessTransports["Wireless Field Transports"]
+        BLE["Bluetooth Low Energy (BLE GATT)"]
+        WIFI["Wi-Fi UDP Broadcast / Unicast"]
+    end
+
+    subgraph WiredTransports["Wired Field Transports"]
+        USB["USB OTG (Android: CANable / candleLight)"]
+    end
+
+    subgraph TargetSystem["Target Physical Bus"]
+        ECU["Vehicle OBD-II / Industrial CANopen Bus"]
+    end
+
+    Core <--> BLE
+    Core <--> WIFI
+    Core <--> USB
+
+    BLE <--> ECU
+    WIFI <--> ECU
+    USB <--> ECU
+```
+
+### 3.3. Cross-Platform UI Framework Evaluation
+Three UI architectures are under active evaluation for the unified mobile + desktop interface:
+
+1. **Slint (Recommended for automotive/embedded)**:
+   - Native compilation to Rust binary with GPU acceleration (Skia or FemtoVG backend).
+   - Minimal memory footprint (< 25 MB RAM) and ultra-responsive 120 fps touch gestures.
+   - First-class toolchain for Android (`cargo apk`) and iOS targets.
+2. **Tauri Mobile v2**:
+   - Rust core powering a responsive web UI (Svelte / React / Tailwind) hosted inside system webviews (Android WebView & iOS WKWebView).
+   - Excellent ecosystem for dynamic data visualizations, gauges, and graph plotting (Canvas/WebGL).
+   - Rapid UI iteration with hot reload.
+3. **Flutter with `flutter_rust_bridge`**:
+   - High-performance Skia/Impeller rendering pipeline with rich mobile UI widgets.
+   - Mature mobile ecosystem (camera, haptics, background services), bridging directly to `canopen-core`.
+
+### 3.4. Mobile Edge AI & Field Diagnostics
+Mobile deployment uniquely enables field-service agentic features:
+* **Camera VIN & Barcode Scanning**: Instant optical recognition of vehicle VIN or industrial motor QR/barcode, automatically querying and loading relevant DBC / EDS / DCF definitions from local storage or cloud registries.
+* **On-Device Diagnostics Assistant**: Running a quantized local model (via ExecuTorch or ONNX Runtime Mobile) or connecting to edge agents over ACP/MCP to guide field technicians through step-by-step troubleshooting.
+* **Haptic & Audio Alerts**: Haptic feedback patterns on critical CAN bus alarms (emergency telegrams, bus-off events, unexpected DTC flags) when the phone is mounted on a vehicle cradle or in pocket.
+
+---
+
+## 4. Protocol & Hardware Expansions
 
 | Feature | Target Milestone | Description |
 | :--- | :---: | :--- |
 | **CANopen FD Support** | v0.4.0 | Support for flexible data-rate frames up to 64 bytes payload (CiA 1301). |
 | **UDS (ISO 14229) over ISO-TP** | v0.4.0 | Full automotive diagnostics session control, ECU flashing, and security access routines. |
-| **DBC / EDS / DCF Importer** | v0.3.5 | Import industry-standard database files to decode proprietary proprietary CAN frames into engineering units. |
+| **DBC / EDS / DCF Importer** | v0.3.5 | Import industry-standard database files to decode proprietary CAN frames into engineering units. |
 | **PCAP / PCAPng Export** | v0.3.5 | Wireshark-compatible packet capture export with CAN subdissectors. |
 | **Edge ML Anomaly Detection** | v0.5.0 | Embedded ONNX runtime in the Rust core for local unsupervised anomaly detection on high-speed bus traffic. |
 
 ---
 
-## 4. Milestone Timeline
+## 5. Milestone Timeline
 
 ```text
 2026 Q3 (Current):
@@ -139,13 +216,21 @@ The roadmap extends this capabilities to emerging agentic interaction standards:
 2026 Q4:
   ├── Phase 1A: Initial 'canopen-core' Rust crate with PyO3 bindings
   ├── UDP Broadcast / Unicast high-speed engine in Rust
+  ├── Mobile transport layer in Rust: BLE (Nordic UART) & Wi-Fi UDP
   └── MCP 2.0 streaming subscriptions for anomaly alerts
 
 2027 Q1:
   ├── Phase 2: AG-UI and A2UI streaming implementation
   ├── Agent Control Protocol (ACP) support
+  ├── Android Alpha: USB OTG (CANable) + BLE + Wi-Fi UDP (Slint / Tauri v2)
   └── CANopen FD & ISO-TP / UDS stack
 
-2027 Q2+:
-  └── Phase 1B: Standalone compiled native GUI application (Rust)
+2027 Q2:
+  ├── Phase 1B: Standalone compiled native GUI application (Desktop Linux/macOS/Windows)
+  └── iOS Alpha: BLE & Wi-Fi UDP with native iOS packaging
+
+2027 Q3+:
+  ├── General Availability (GA) of unified Multi-Platform Release (Desktop + Android + iOS)
+  └── Edge ML anomaly detection engine
 ```
+
