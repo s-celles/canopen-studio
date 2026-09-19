@@ -38,6 +38,9 @@ class FakeElm327(ElmTransport):
         status: A status word to answer every OBD request with, e.g. "NO DATA".
         truncate: Cut every OBD reply line to this many characters, to exercise the
             parser against a reply that was cut off mid-transfer.
+        extended: Print 29-bit headers, byte by byte, as an adapter does.
+        dpn: What ATDPN reports, e.g. "A6" for autodetected ISO 15765-4 CAN 11/500.
+        voltage: What ATRV reports.
     """
 
     def __init__(
@@ -49,6 +52,8 @@ class FakeElm327(ElmTransport):
         truncate: Optional[int] = None,
         device_description: str = DEVICE_DESCRIPTION,
         extended: bool = False,
+        dpn: str = "A6",
+        voltage: str = "12.6V",
     ):
         self.version = version
         self.ecus = {k.upper().replace(" ", ""): v for k, v in (ecus or {}).items()}
@@ -57,6 +62,8 @@ class FakeElm327(ElmTransport):
         self.truncate = truncate
         self.device_description = device_description
         self.extended = extended
+        self.dpn = dpn
+        self.voltage = voltage
 
         # Adapter settings, in the state a real chip powers up in.
         self.echo = True
@@ -157,7 +164,13 @@ class FakeElm327(ElmTransport):
             self._line("AUTO, ISO 15765-4 (CAN 11/500)")
             return
         if body == "DPN":
-            self._line("A6")
+            self._line(self.dpn)
+            return
+        if body == "RV":
+            self._line(self.voltage)
+            return
+        if body == "PC":
+            self._line("OK")
             return
         if body in ("E0", "E1"):
             self.echo = body == "E1"
@@ -179,6 +192,11 @@ class FakeElm327(ElmTransport):
         self._line("OK")
 
     def _handle_obd(self, request_hex: str) -> None:
+        # A trailing digit on an odd-length request is the ELM327 "expected responses"
+        # hint, not part of the request itself.
+        if len(request_hex) % 2:
+            request_hex = request_hex[:-1]
+
         if self.status:
             self._line(self.status)
             return
