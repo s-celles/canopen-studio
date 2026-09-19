@@ -11,11 +11,12 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
     let ui_handle: Weak<MainWindow> = ui.as_weak();
 
-    // Start background simulation thread on Multicast so all local sniffers get it!
+    // Start background simulator on a separate socket (binds to 0, sends to 1750)
     spawn_udp_simulator("127.0.0.1", 1750);
 
     thread::spawn(move || {
-        let bus = match UdpCanBus::new(1750, "127.0.0.1", 1750, true) {
+        // UI listens on 1750
+        let bus = match UdpCanBus::new(1750, "127.0.0.1", 1750, false) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("Failed to bind UdpCanBus: {:?}", e);
@@ -25,9 +26,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let _ = bus.set_read_timeout(Some(Duration::from_millis(5)));
 
         let mut last_rpm = 0;
-        let mut last_nmt = "Offline".to_string();
         let mut trace_count = 0;
-        
         let mut rpm_history: VecDeque<i32> = VecDeque::with_capacity(800);
 
         loop {
@@ -37,18 +36,6 @@ fn main() -> Result<(), slint::PlatformError> {
                     let id = frame.id;
                     let data = frame.payload();
                     let mut updated = false;
-
-                    if id == 0x701 && data.len() >= 1 {
-                        let st = data[0];
-                        last_nmt = match st {
-                            0x00 => "Boot-Up".to_string(),
-                            0x04 => "Stopped".to_string(),
-                            0x05 => "Operational".to_string(),
-                            0x7F => "Pre-Operational".to_string(),
-                            _ => format!("Unknown (0x{:02X})", st),
-                        };
-                        updated = true;
-                    }
 
                     if id == 0x473 && data.len() >= 8 {
                         let mut rpm_bytes = [0u8; 4];
@@ -62,9 +49,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         updated = true;
                     }
 
-                    if updated {
+                    if updated || trace_count % 10 == 0 {
                         let rpm = last_rpm;
-                        let nmt = last_nmt.clone();
                         let total_trace = trace_count;
                         
                         let mut path = String::with_capacity(rpm_history.len() * 15);
@@ -85,8 +71,7 @@ fn main() -> Result<(), slint::PlatformError> {
 
                         let _ = ui_handle.upgrade_in_event_loop(move |ui| {
                             ui.set_rpm(rpm);
-                            ui.set_nmt_state(nmt.into());
-                            ui.set_trace_count(total_trace);
+                            ui.set_total_rx(total_trace);
                             if !path.is_empty() {
                                 ui.set_plot_path_b0(path.into());
                             }

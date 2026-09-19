@@ -48,10 +48,18 @@ impl UdpCanBus {
         sock.set_multicast_loop_v4(true)?;
         sock.set_nonblocking(false)?;
 
-        let bind_addr: SocketAddr = format!("0.0.0.0:{}", bind_port)
+        let bind_ip = if target_host.starts_with("127.") { target_host } else { "0.0.0.0" };
+        let bind_addr: SocketAddr = format!("{}:{}", bind_ip, bind_port)
             .parse()
             .map_err(|e: std::net::AddrParseError| UdpBusError::InvalidAddress(e.to_string()))?;
         sock.bind(&bind_addr.into())?;
+
+        if let Ok(ip) = target_host.parse::<std::net::Ipv4Addr>() {
+            if ip.is_multicast() {
+                let _ = sock.join_multicast_v4(&ip, &std::net::Ipv4Addr::new(0, 0, 0, 0));
+            }
+        }
+
 
         let socket: UdpSocket = sock.into();
 
