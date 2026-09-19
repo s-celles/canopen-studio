@@ -112,10 +112,12 @@ class LatencyTracker:
         try:
             bus.send(msg)
             return seq
-        except Exception:
+        except Exception as exc:
             with self._lock:
                 self._pending_pings.pop(seq, None)
                 self.pings_sent = max(0, self.pings_sent - 1)
+            cause = getattr(exc, "__cause__", None)
+            self.last_error = f"{exc} (cause: {cause!r})"
             return None
 
     def process_message(self, msg: can.Message, bus: Optional[can.Bus] = None) -> Optional[float]:

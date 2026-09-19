@@ -194,7 +194,8 @@ def ping_bus(timeout: float = 1.0) -> dict:
 
     seq = _app_ref.latency_tracker.send_ping(_app_ref.bus)
     if seq is None:
-        return {"error": "Failed to transmit ping frame"}
+        err = getattr(_app_ref.latency_tracker, "last_error", "Failed to transmit ping frame")
+        return {"error": f"Failed to transmit ping frame: {err}"}
     _app_ref.stats["total_tx"] += 1
 
     deadline = time.time() + timeout
@@ -324,7 +325,8 @@ def send_frame(can_id: int, data: list[int], extended: bool = False) -> str:
         _count_tx()
         return f"Sent 0x{can_id:03X} [{' '.join(f'{b:02X}' for b in data)}]"
     except Exception as exc:
-        return f"Send failed: {exc}"
+        cause = getattr(exc, "__cause__", None)
+        return f"Send failed: {exc} (cause: {cause!r})"
 
 
 @mcp.tool()
