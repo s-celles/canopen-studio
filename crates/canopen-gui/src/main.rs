@@ -71,8 +71,10 @@ fn main() -> Result<(), slint::PlatformError> {
                         let h = 300.0;
                         let max_rpm = 4000.0;
                         
+                        let len = rpm_history.len();
                         for (i, &val) in rpm_history.iter().enumerate() {
-                            let x = (i as f32 / 800.0) * w;
+                            let points_from_right = (len - 1 - i) as f32;
+                            let x = w - (points_from_right / 800.0) * w;
                             let v = if val < 0 { 0.0 } else if val as f32 > max_rpm { max_rpm } else { val as f32 };
                             let y = h - ((v / max_rpm) * h);
                             if i == 0 {
