@@ -289,6 +289,90 @@ impl PyUdpCanBus {
 
 #[cfg(feature = "python")]
 #[pyfunction]
+pub fn decode_canopen_message<'py>(
+    py: Python<'py>,
+    frame: &PyCanFrame,
+) -> PyResult<Bound<'py, PyDict>> {
+    let info = crate::canopen::decode_canopen_frame(&frame.inner);
+    let d = PyDict::new(py);
+
+    let mut s_type = "RAW_CAN";
+    let mut node_id: Option<u8> = None;
+    let mut pdo_num: Option<u8> = None;
+
+    if frame.inner.is_extended {
+        s_type = "EXTENDED_J1939";
+        node_id = Some((frame.inner.id & 0xFF) as u8);
+    } else {
+        match info.service {
+            crate::canopen::CanopenService::NmtCommand => {
+                s_type = "NMT_MASTER";
+                // Target node is byte 1
+                if let Some(&node) = frame.inner.payload().get(1) {
+                    node_id = Some(node);
+                }
+            }
+            crate::canopen::CanopenService::Sync => {
+                s_type = "SYNC";
+            }
+            crate::canopen::CanopenService::Time => {
+                s_type = "TIME_STAMP";
+            }
+            crate::canopen::CanopenService::Emergency { node_id: n, .. } => {
+                s_type = "EMERGENCY";
+                node_id = Some(n);
+            }
+            crate::canopen::CanopenService::Tpdo {
+                pdo_num: p,
+                node_id: n,
+            } => {
+                s_type = "TPDO";
+                pdo_num = Some(p);
+                node_id = Some(n);
+            }
+            crate::canopen::CanopenService::Rpdo {
+                pdo_num: p,
+                node_id: n,
+            } => {
+                s_type = "RPDO";
+                pdo_num = Some(p);
+                node_id = Some(n);
+            }
+            crate::canopen::CanopenService::Tsdo { node_id: n } => {
+                s_type = "SDO_TX"; // Server->Client
+                node_id = Some(n);
+            }
+            crate::canopen::CanopenService::Rsdo { node_id: n } => {
+                s_type = "SDO_RX"; // Client->Server
+                node_id = Some(n);
+            }
+            crate::canopen::CanopenService::Heartbeat { node_id: n, state } => {
+                s_type = "HEARTBEAT";
+                node_id = Some(n);
+                d.set_item("nmt_state", state as u8)?;
+            }
+            crate::canopen::CanopenService::Other { .. } => {}
+        }
+    }
+
+    d.set_item("service", s_type)?;
+    d.set_item("description", info.description)?;
+    if let Some(n) = node_id {
+        d.set_item("node_id", n)?;
+    } else {
+        d.set_item("node_id", py.None())?;
+    }
+    if let Some(p) = pdo_num {
+        d.set_item("pdo_number", p)?;
+    } else {
+        d.set_item("pdo_number", py.None())?;
+    }
+
+    Ok(d)
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
 pub fn decode_canopen(frame: &PyCanFrame) -> (String, String) {
     let info = decode_canopen_frame(&frame.inner);
     let s_type = match info.service {
@@ -855,6 +939,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNmtMaster>()?;
     m.add_class::<PyEdsFile>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_canopen_message, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_write, m)?)?;

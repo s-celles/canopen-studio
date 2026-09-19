@@ -28,7 +28,7 @@ class TestCANopenLayer:
         assert parsed is not None
         assert parsed.service == CanopenService.NMT_MASTER
         assert parsed.node_id == 5
-        assert "Cmd: 0x01" in parsed.decoded_info
+        assert "Start Remote Node" in parsed.decoded_info
 
     def test_sync_frame(self, layer):
         """Test detection of SYNC frames (COB-ID 0x080)."""
@@ -64,7 +64,7 @@ class TestCANopenLayer:
 
         assert req_parsed.service == CanopenService.SDO_RX
         assert req_parsed.node_id == 1
-        assert "0x1017:00" in req_parsed.decoded_info
+        assert "SDO Request" in req_parsed.decoded_info
 
         resp_msg = can.Message(
             arbitration_id=0x581, is_extended_id=False, data=[0x4B, 0x17, 0x10, 0x00, 0xE8, 0x03, 0x00, 0x00]
@@ -73,7 +73,7 @@ class TestCANopenLayer:
 
         assert resp_parsed.service == CanopenService.SDO_TX
         assert resp_parsed.node_id == 1
-        assert "0x1017:00" in resp_parsed.decoded_info
+        assert "SDO Response" in resp_parsed.decoded_info
 
     def test_emergency_frame(self, layer):
         """Test Emergency (EMCY) frame decoding (COB-ID 0x080 + NodeID)."""
