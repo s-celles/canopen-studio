@@ -179,11 +179,10 @@ def is_multicast_ip(ip_str: str) -> bool:
 class UdpBus(can.BusABC):
     """
     Standard UDP unicast/broadcast CAN bus backend.
-
-    Uses python-can's msgpack wire format for CAN frames, but transmits over
-    standard UDP unicast or broadcast rather than IP multicast. This allows
-    reliable cross-machine communication on macOS (bypassing the Cocoa GUI multicast
-    entitlement restriction) and networks where multicast routing is disabled.
+    
+    If the Rust `canopen_core` module is available, it uses the high-performance
+    native backend `UdpCanBus` which parses frames at wire speed. Otherwise,
+    it falls back to Python `socket` and `python-can`'s msgpack logic.
     """
 
     def __init__(
@@ -197,41 +196,78 @@ class UdpBus(can.BusABC):
         self.dest_ip = channel
         self.port = port
         self.receive_own_messages = receive_own_messages
+        self._native_bus = None
+        self._native_core = None
+        
+        try:
+            from . import canopen_core
+            self._native_bus = canopen_core.UdpCanBus(bind_port=self.port, target_host=self.dest_ip, target_port=self.port, compact=False)
+            self._native_core = canopen_core
+        except ImportError:
+            pass
 
-        from can.interfaces.udp_multicast.utils import pack_message, unpack_message
-        self._pack_message = pack_message
-        self._unpack_message = unpack_message
+        if self._native_bus is None:
+            from can.interfaces.udp_multicast.utils import pack_message, unpack_message
+            self._pack_message = pack_message
+            self._unpack_message = unpack_message
 
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        if hasattr(socket, "SO_REUSEPORT"):
-            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        self._sock.bind(("", self.port))
-        self._send_dest = (self.dest_ip, self.port)
+            self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, "SO_REUSEPORT"):
+                self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            self._sock.bind(("", self.port))
+            self._send_dest = (self.dest_ip, self.port)
 
     def send(self, msg: can.Message, timeout: Optional[float] = None) -> None:
-        data = self._pack_message(msg)
-        self._sock.sendto(data, self._send_dest)
+        if self._native_bus is not None:
+            # Convert can.Message to PyCanFrame
+            frame = self._native_core.CanFrame(
+                msg.arbitration_id, 
+                bytes(msg.data), 
+                int(msg.timestamp * 1_000_000) if msg.timestamp else None,
+                msg.is_extended_id
+            )
+            self._native_bus.send(frame)
+        else:
+            data = self._pack_message(msg)
+            self._sock.sendto(data, self._send_dest)
 
     def _recv_internal(self, timeout: Optional[float]) -> tuple[Optional[can.Message], bool]:
-        self._sock.settimeout(timeout)
-        try:
-            raw, addr = self._sock.recvfrom(4096)
-            now = time.time()
-            msg = self._unpack_message(raw, replace={"timestamp": now})
-            return msg, False
-        except (socket.timeout, TimeoutError):
+        if self._native_bus is not None:
+            t_ms = int(timeout * 1000) if timeout is not None else None
+            res = self._native_bus.recv(t_ms)
+            if res is not None:
+                frame, _addr = res
+                msg = can.Message(
+                    timestamp=frame.timestamp_sec,
+                    arbitration_id=frame.id,
+                    is_extended_id=frame.is_extended,
+                    data=frame.data,
+                    is_remote_frame=frame.is_remote,
+                    is_error_frame=frame.is_error,
+                )
+                return msg, False
             return None, False
-        except OSError:
-            return None, False
+        else:
+            self._sock.settimeout(timeout)
+            try:
+                raw, addr = self._sock.recvfrom(4096)
+                now = time.time()
+                msg = self._unpack_message(raw, replace={"timestamp": now})
+                return msg, False
+            except (socket.timeout, TimeoutError):
+                return None, False
+            except OSError:
+                return None, False
 
     def shutdown(self) -> None:
         super().shutdown()
-        try:
-            self._sock.close()
-        except OSError:
-            pass
+        if self._native_bus is None:
+            try:
+                self._sock.close()
+            except OSError:
+                pass
 
 
 def open_can_bus(
