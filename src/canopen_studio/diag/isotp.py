@@ -49,9 +49,13 @@ PHYSICAL_REQUEST_BASE_11BIT = 0x7E0
 RESPONSE_BASE_11BIT = 0x7E8
 ECU_COUNT_11BIT = 8
 
+# 29-bit addressing embeds both ends in the identifier: 0x18DA<target><source>, with the
+# external test equipment fixed at 0xF1. A request is therefore 0x18DA<ecu>F1 and its
+# answer 0x18DAF1<ecu> — the two address bytes swap, they do not shift.
 FUNCTIONAL_REQUEST_29BIT = 0x18DB33F1
 PHYSICAL_REQUEST_BASE_29BIT = 0x18DA00F1
 RESPONSE_PREFIX_29BIT = 0x18DAF1
+TESTER_ADDRESS_29BIT = 0xF1
 
 # Separation times of 0x80..0xF0 and 0xFA..0xFF are reserved. ISO 15765-2 says a receiver
 # meeting one must fall back to the longest defined value rather than guess.
@@ -59,19 +63,22 @@ STMIN_RESERVED_FALLBACK = 0.127
 MAX_STMIN_MILLISECONDS = 0x7F
 
 
-def physical_request_id(ecu_index: int, extended: bool = False) -> int:
+def physical_request_id(ecu_address: int, extended: bool = False) -> int:
     """
     Build the request identifier addressing one ECU directly.
 
     Args:
-        ecu_index: Which of the eight ECU addresses to target, 0 through 7.
+        ecu_address: With 11-bit addressing, which of the eight legislated ECU slots to
+            target, 0 through 7. With 29-bit addressing, the ECU's own address byte.
         extended: True for 29-bit addressing, False for the 11-bit default.
     """
-    if not 0 <= ecu_index < ECU_COUNT_11BIT:
-        raise ValueError(f"ECU index {ecu_index} is outside the standard range 0..7")
     if extended:
-        return PHYSICAL_REQUEST_BASE_29BIT | ((RESPONSE_BASE_11BIT + ecu_index) & 0xFF) << 8
-    return PHYSICAL_REQUEST_BASE_11BIT + ecu_index
+        if not 0 <= ecu_address <= 0xFF:
+            raise ValueError(f"ECU address 0x{ecu_address:X} does not fit in a byte")
+        return PHYSICAL_REQUEST_BASE_29BIT | (ecu_address << 8)
+    if not 0 <= ecu_address < ECU_COUNT_11BIT:
+        raise ValueError(f"ECU index {ecu_address} is outside the standard range 0..7")
+    return PHYSICAL_REQUEST_BASE_11BIT + ecu_address
 
 
 def is_response_id(can_id: int, extended: bool = False) -> bool:
