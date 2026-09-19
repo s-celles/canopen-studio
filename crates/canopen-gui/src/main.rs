@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use std::collections::VecDeque;
 use slint::Weak;
 use canopen_core::udp::UdpCanBus;
 use canopen_core::frame::CanFrame;
@@ -19,14 +20,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
         };
-        let _ = bus.set_read_timeout(Some(Duration::from_millis(10)));
+        let _ = bus.set_read_timeout(Some(Duration::from_millis(5)));
 
         let mut last_rpm = 0;
         let mut last_nmt = "Offline".to_string();
+        let mut trace_count = 0;
+        
+        let mut rpm_history: VecDeque<i32> = VecDeque::with_capacity(800);
 
         loop {
             match bus.recv() {
                 Ok((frame, _addr)) => {
+                    trace_count += 1;
+                    
                     let id = frame.id;
                     let data = frame.payload();
                     let mut updated = false;
@@ -47,15 +53,48 @@ fn main() -> Result<(), slint::PlatformError> {
                         let mut rpm_bytes = [0u8; 4];
                         rpm_bytes.copy_from_slice(&data[4..8]);
                         last_rpm = i32::from_le_bytes(rpm_bytes);
+                        
+                        rpm_history.push_back(last_rpm);
+                        if rpm_history.len() > 800 {
+                            rpm_history.pop_front();
+                        }
+                        
                         updated = true;
                     }
 
                     if updated {
                         let rpm = last_rpm;
                         let nmt = last_nmt.clone();
+                        let total_trace = trace_count;
+                        
+                        // Generate SVG path for the Plotter (width: approx 800px, height: approx 300px inside view)
+                        // Max RPM we simulate is roughly 4000
+                        let mut path = String::with_capacity(rpm_history.len() * 15);
+                        let w = 800.0;
+                        let h = 300.0;
+                        let max_rpm = 4000.0;
+                        
+                        let points_count = rpm_history.len();
+                        for (i, &val) in rpm_history.iter().enumerate() {
+                            let x = (i as f32 / 800.0) * w;
+                            // Clamp value
+                            let v = if val < 0 { 0.0 } else if val as f32 > max_rpm { max_rpm } else { val as f32 };
+                            let y = h - ((v / max_rpm) * h);
+                            
+                            if i == 0 {
+                                path.push_str(&format!("M {} {} ", x, y));
+                            } else {
+                                path.push_str(&format!("L {} {} ", x, y));
+                            }
+                        }
+
                         let _ = ui_handle.upgrade_in_event_loop(move |ui| {
                             ui.set_rpm(rpm);
                             ui.set_nmt_state(nmt.into());
+                            ui.set_trace_count(total_trace);
+                            if !path.is_empty() {
+                                ui.set_plot_path(path.into());
+                            }
                         });
                     }
                 }

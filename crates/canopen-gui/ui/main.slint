@@ -1,4 +1,4 @@
-import { Button, CheckBox, ComboBox, GroupBox, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     width: 1000px;
@@ -8,7 +8,9 @@ export component MainWindow inherits Window {
     in-out property <int> rpm: 0;
     in-out property <string> nmt_state: "Pre-Operational";
     in-out property <string> connection_status: "Connected";
-    in-out property <int> active_tab: 0; // 0: Dashboard, 1: Plotter, 2: Trace
+    in-out property <int> active_tab: 0; 
+    in-out property <string> plot_path: "";
+    in-out property <int> trace_count: 0;
 
     VerticalLayout {
         // TOP BAR
@@ -21,36 +23,14 @@ export component MainWindow inherits Window {
                 spacing: 15px;
                 alignment: start;
                 
-                Text {
-                    text: "Interface:";
-                    vertical-alignment: center;
-                    color: white;
-                }
-                ComboBox {
-                    model: ["UDP Multicast", "SocketCAN", "Virtual"];
-                    current-index: 0;
-                    width: 150px;
-                }
+                Text { text: "Interface:"; vertical-alignment: center; color: white; }
+                ComboBox { model: ["UDP Multicast", "SocketCAN", "Virtual"]; current-index: 0; width: 150px; }
                 
-                Text {
-                    text: "Channel:";
-                    vertical-alignment: center;
-                    color: white;
-                }
-                LineEdit {
-                    text: "127.0.0.1:1750";
-                    width: 150px;
-                }
+                Text { text: "Channel:"; vertical-alignment: center; color: white; }
+                LineEdit { text: "127.0.0.1:1750"; width: 150px; }
 
-                CheckBox {
-                    text: "Simulate";
-                    checked: true;
-                }
-
-                Button {
-                    text: "Connect";
-                    primary: true;
-                }
+                CheckBox { text: "Simulate"; checked: true; }
+                Button { text: "Connect"; primary: true; }
                 
                 Rectangle { horizontal-stretch: 1; }
                 
@@ -63,7 +43,6 @@ export component MainWindow inherits Window {
             }
         }
         
-        // MAIN BODY
         HorizontalLayout {
             // SIDEBAR TABS
             Rectangle {
@@ -95,13 +74,6 @@ export component MainWindow inherits Window {
                         Text { text: "📋 Real-time Trace"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 2 ? 700 : 400; }
                         TouchArea { clicked => { root.active_tab = 2; } }
                     }
-                    Rectangle {
-                        height: 40px;
-                        background: root.active_tab == 3 ? #313244 : transparent;
-                        border-radius: 6px;
-                        Text { text: "🚀 Transmit"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 3 ? 700 : 400; }
-                        TouchArea { clicked => { root.active_tab = 3; } }
-                    }
                     Rectangle { vertical-stretch: 1; }
                 }
             }
@@ -116,12 +88,7 @@ export component MainWindow inherits Window {
                     spacing: 30px;
                     alignment: start;
 
-                    Text {
-                        text: "CANopen Node 1 (SEVCON Gen4)";
-                        font-size: 28px;
-                        font-weight: 700;
-                        color: white;
-                    }
+                    Text { text: "CANopen Node 1 (SEVCON Gen4)"; font-size: 28px; font-weight: 700; color: white; }
 
                     HorizontalLayout {
                         spacing: 20px;
@@ -131,7 +98,6 @@ export component MainWindow inherits Window {
                             border-radius: 12px;
                             height: 150px;
                             width: 250px;
-                            
                             VerticalLayout {
                                 alignment: center;
                                 Text { text: root.rpm + " RPM"; font-size: 42px; font-weight: 800; color: #a6e3a1; horizontal-alignment: center; }
@@ -144,7 +110,6 @@ export component MainWindow inherits Window {
                             border-radius: 12px;
                             height: 150px;
                             width: 250px;
-                            
                             VerticalLayout {
                                 alignment: center;
                                 Text { text: root.nmt_state; font-size: 32px; font-weight: 800; color: root.nmt_state == "Operational" ? #a6e3a1 : #f9e2af; horizontal-alignment: center; }
@@ -156,16 +121,51 @@ export component MainWindow inherits Window {
                 
                 // PLOTTER VIEW
                 if root.active_tab == 1 : VerticalLayout {
-                    padding: 40px;
-                    alignment: center;
-                    Text { text: "Plotter is under construction"; color: white; font-size: 24px; horizontal-alignment: center; }
+                    padding: 20px;
+                    spacing: 10px;
+                    
+                    Text { text: "Live RPM Telemetry (0x606C)"; font-size: 20px; color: white; font-weight: 700; }
+                    
+                    Rectangle {
+                        background: #1e1e2e;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #45475a;
+                        clip: true;
+                        
+                        // Y-Axis labels
+                        Text { text: "4000"; color: #6c7086; x: 5px; y: 10px; font-size: 12px; }
+                        Text { text: "2000"; color: #6c7086; x: 5px; y: 140px; font-size: 12px; }
+                        Text { text: "0"; color: #6c7086; x: 5px; y: 270px; font-size: 12px; }
+                        
+                        // The actual path
+                        Path {
+                            commands: root.plot_path;
+                            stroke: #89b4fa;
+                            stroke-width: 2px;
+                        }
+                    }
                 }
                 
                 // TRACE VIEW
                 if root.active_tab == 2 : VerticalLayout {
-                    padding: 40px;
-                    alignment: center;
-                    Text { text: "Trace is under construction"; color: white; font-size: 24px; horizontal-alignment: center; }
+                    padding: 20px;
+                    spacing: 15px;
+                    
+                    Text { text: "Network Trace (Total: " + root.trace_count + " frames)"; color: white; font-size: 20px; font-weight: 700; }
+                    
+                    Rectangle {
+                        background: #1e1e2e;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #45475a;
+                        
+                        VerticalLayout {
+                            padding: 15px;
+                            Text { text: "Fast live tracing requires ListView / Model rendering in Slint."; color: #a6adc8; }
+                            Text { text: "Currently tracking count in backend."; color: #a6adc8; }
+                        }
+                    }
                 }
             }
         }
