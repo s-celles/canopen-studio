@@ -28,6 +28,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut last_rpm = 0;
         let mut trace_count = 0;
         let mut rpm_history: VecDeque<i32> = VecDeque::with_capacity(800);
+        let mut trace_lines: VecDeque<String> = VecDeque::with_capacity(50);
+        
+        let start_time = std::time::Instant::now();
 
         loop {
             match bus.recv() {
@@ -49,9 +52,19 @@ fn main() -> Result<(), slint::PlatformError> {
                         updated = true;
                     }
 
+                    // Format Trace Line
+                    let elapsed = start_time.elapsed().as_secs_f32();
+                    let hex_data: Vec<String> = data.iter().map(|b| format!("{:02X}", b)).collect();
+                    let line = format!("{:>8.3} | ID: 0x{:03X} | DLC: {} | Data: {}", elapsed, id, data.len(), hex_data.join(" "));
+                    trace_lines.push_front(line);
+                    if trace_lines.len() > 50 {
+                        trace_lines.pop_back();
+                    }
+
                     if updated || trace_count % 10 == 0 {
                         let rpm = last_rpm;
                         let total_trace = trace_count;
+                        let trace_text = trace_lines.iter().cloned().collect::<Vec<String>>().join("\n");
                         
                         let mut path = String::with_capacity(rpm_history.len() * 15);
                         let w = 800.0;
@@ -72,6 +85,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         let _ = ui_handle.upgrade_in_event_loop(move |ui| {
                             ui.set_rpm(rpm);
                             ui.set_total_rx(total_trace);
+                            ui.set_trace_text(trace_text.into());
                             if !path.is_empty() {
                                 ui.set_plot_path_b0(path.into());
                             }

@@ -1,4 +1,4 @@
-import { Button, CheckBox, ComboBox, LineEdit, TabWidget, StandardTableView, Palette } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, TabWidget, StandardTableView, Palette, TextEdit } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     width: 1150px;
@@ -21,6 +21,7 @@ export component MainWindow inherits Window {
     in-out property <string> plot_path_b0: "";
     in-out property <string> plot_path_b1: "";
     
+    in-out property <string> trace_text;
     in-out property <[[StandardListViewItem]]> nodes_model: [
         [ { text: "Node 1" }, { text: "Operational" }, { text: "0.0s ago" }, { text: "HEARTBEAT, TPDO" } ],
         [ { text: "Node 2" }, { text: "Pre-Operational" }, { text: "1.0s ago" }, { text: "HEARTBEAT" } ]
@@ -245,11 +246,45 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            Tab { title: "📋 Real-time Trace"; Text { text: "Under Construction"; color: Palette.foreground; } }
-            Tab { title: "🚀 Transmit & Control"; Text { text: "Under Construction"; color: Palette.foreground; } }
-            Tab { title: "📖 SDO Object Dictionary"; Text { text: "Under Construction"; color: Palette.foreground; } }
-            Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Under Construction"; color: Palette.foreground; } }
-            Tab { title: "📚 CANopen Reference"; Text { text: "Under Construction"; color: Palette.foreground; } }
+            Tab { 
+                title: "📋 Real-time Trace"; 
+                VerticalLayout {
+                    padding: 10px;
+                    TextEdit {
+                        text: root.trace_text;
+                        read-only: true;
+                        font-size: 12px;
+                    }
+                }
+            }
+            Tab { 
+                title: "🚀 Transmit & Control"; 
+                VerticalLayout {
+                    padding: 20px; spacing: 15px; alignment: start;
+                    Text { text: "Manual CAN Frame Transmission"; font-size: 16px; font-weight: 700; color: Palette.foreground; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: "CAN ID (Hex):"; vertical-alignment: center; color: Palette.foreground; }
+                        LineEdit { text: "0x601"; width: 80px; }
+                        Text { text: "Data (Hex):"; vertical-alignment: center; color: Palette.foreground; }
+                        LineEdit { text: "40 00 10 00 00 00 00 00"; width: 200px; }
+                        Button { text: "Send Frame"; primary: true; }
+                    }
+                    Rectangle { height: 1px; background: Palette.border; }
+                    Text { text: "NMT Control (Network Management)"; font-size: 16px; font-weight: 700; color: Palette.foreground; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Button { text: "Start Node (0x01)"; }
+                        Button { text: "Stop Node (0x02)"; }
+                        Button { text: "Enter Pre-Op (0x80)"; }
+                        Button { text: "Reset Node (0x81)"; }
+                        Button { text: "Reset Comm (0x82)"; }
+                    }
+                }
+            }
+            Tab { title: "📖 SDO Object Dictionary"; Text { text: "Dictionary Explorer (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
+            Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Hardware State & Errors (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
+            Tab { title: "📚 CANopen Reference"; Text { text: "Documentation (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
         }
     }
 }
