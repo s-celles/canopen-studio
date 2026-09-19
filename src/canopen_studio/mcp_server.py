@@ -67,15 +67,7 @@ def diagnostic_write_notice() -> str | None:
     return _diag_tools.startup_notice()
 
 
-@mcp.tool()
-def debug_eval(expr: str) -> str:
-    """Evaluate a python expression inside the running app context for debugging."""
-    try:
-        res = eval(expr, globals(), {"app": _app_ref})
-        return str(res)
-    except Exception as exc:
-        import traceback
-        return f"Error: {exc}\n{traceback.format_exc()}"
+
 
 
 # ---------------------------------------------------------------------------
