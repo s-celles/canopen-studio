@@ -1,0 +1,60 @@
+# Worked example of a manufacturer profile. NOT REAL VEHICLE DATA.
+#
+# The world manufacturer identifiers, the PIDs and the trouble code wordings below are
+# invented to demonstrate the format. They are deliberately placed under a WMI that no
+# manufacturer uses, so this profile cannot match a real vehicle by accident.
+#
+# Copy this file to build a real profile: put it in any directory you pass to
+# ProfileLibrary, or import one with the DBC and Torque CSV importers.
+
+id: example_make
+name: Example Make (documentation sample)
+extends: j1979_base
+description: >-
+  Demonstrates a manufacturer layer: extra PIDs beyond SAE J1979, manufacturer trouble
+  code wordings, and the rules that decide when the profile applies. The data is
+  invented and matches no real vehicle.
+
+# Which vehicles this profile claims. Every rule is optional; a profile with no rules is
+# never selected automatically, only by hand.
+match:
+  wmi: [ZZZ]
+  years:
+    from: 2015
+    to: 2025
+  # The supported-PID rules a real profile would also carry are shown here as comments
+  # rather than as rules, on purpose. The fingerprint stage runs when no VIN is
+  # available and therefore cannot see the `wmi` rule above, so a documentation profile
+  # that declared them could be selected for a real vehicle whose PID set happened to
+  # fit. A real profile does declare them:
+  #
+  #   required_pids: ["01:5B"]    # PIDs the vehicle must support
+  #   forbidden_pids: ["01:5E"]   # PIDs it must NOT have, which separates two variants
+
+pids:
+  # A manufacturer PID beyond the legislated set.
+  "01:A0":
+    name: example_battery_temperature
+    description: Traction battery temperature (example manufacturer PID)
+    bytes: 2
+    unit: "°C"
+    formula: (256 * A + B) / 10 - 40
+    min: -40
+    max: 120
+
+  # Redefining an inherited PID. The child wins, which is how a manufacturer scaling
+  # that differs from the standard is corrected without touching the base profile.
+  "01:5B":
+    name: hybrid_battery_remaining_life
+    description: Traction battery state of health (example manufacturer scaling)
+    bytes: 1
+    unit: "%"
+    formula: A / 2
+    min: 0
+    max: 100
+
+# Manufacturer wordings for trouble codes. Applied on top of whatever the base profile
+# defines, so a generic code keeps its generic meaning unless it is overridden here.
+dtcs:
+  P1234: Example manufacturer fault, traction battery contactor
+  P1235: Example manufacturer fault, coolant pump
