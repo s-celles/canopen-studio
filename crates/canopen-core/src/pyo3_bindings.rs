@@ -1052,6 +1052,8 @@ impl PyVirtualCanopenSimulator {
 }
 
 #[pymodule]
+#[cfg(feature = "python")]
+#[pymodule]
 pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCanFrame>()?;
     m.add_class::<PyLatencyTracker>()?;
