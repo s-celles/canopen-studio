@@ -21,6 +21,7 @@ export component MainWindow inherits Window {
     in-out property <string> plot_path_b0: "";
     in-out property <string> plot_path_b1: "";
     
+    in-out property <bool> show_about: false;
     in-out property <string> trace_text;
     in-out property <[[StandardListViewItem]]> nodes_model: [
         [ { text: "Node 1" }, { text: "Operational" }, { text: "0.0s ago" }, { text: "HEARTBEAT, TPDO" } ],
@@ -62,7 +63,7 @@ export component MainWindow inherits Window {
                     vertical-alignment: center;
                 }
                 
-                Button { text: "i About"; }
+                Button { text: "i About"; clicked => { root.show_about = true; } }
             }
         }
         
@@ -364,6 +365,40 @@ export component MainWindow inherits Window {
             }
             Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Hardware State & Errors (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
             Tab { title: "📚 CANopen Reference"; Text { text: "Documentation (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
+        }
+    }
+    
+    if root.show_about: Rectangle {
+        width: 100%; height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        TouchArea { } // intercept background clicks
+        
+        Rectangle {
+            width: 440px; height: 320px;
+            background: Palette.control-background;
+            border-color: Palette.border; border-width: 1px; border-radius: 8px;
+            
+            VerticalLayout {
+                padding: 24px; spacing: 12px; alignment: start;
+                
+                Text { text: "CAN & CANopen Studio"; font-size: 18px; font-weight: 700; color: #007acc; horizontal-alignment: center; }
+                Text { text: "Universal Protocol Analyzer & Transmit Station"; font-size: 14px; font-weight: 700; color: Palette.foreground; horizontal-alignment: center; }
+                Text { text: "Version 0.2.2 (Rust Edition)"; font-size: 12px; font-weight: 400; color: #666666; horizontal-alignment: center; }
+                
+                Rectangle { height: 1px; background: Palette.border;  }
+                
+                Text { text: "Project & Author"; font-size: 14px; font-weight: 700; color: Palette.foreground; }
+                Text { text: "Author: Sébastien Celles"; font-size: 13px; font-weight: 700; color: Palette.foreground; }
+                Text { text: "License: GNU General Public License v3.0 (GPL-3.0-or-later)"; font-size: 12px; color: Palette.foreground; }
+                Text { text: "GitHub: s-celles/canopen-studio"; font-size: 12px; color: #007acc; }
+                
+                Rectangle { height: 1px; background: Palette.border;  }
+                
+                HorizontalLayout {
+                    alignment: end;
+                    Button { text: "Close"; primary: true; clicked => { root.show_about = false; } }
+                }
+            }
         }
     }
 }
