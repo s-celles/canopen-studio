@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
 # A request that goes unanswered for this long is treated as unsupported rather than
 # retried: J1979 ECUs answer in tens of milliseconds, and a scan walks hundreds of PIDs.
@@ -189,6 +189,7 @@ class DiagnosticInterface(ABC):
     def __init__(self) -> None:
         self._open_flag = False
         self.default_timeout = DEFAULT_TIMEOUT
+        self._j1979: Any = None
 
     # -- Identity ----------------------------------------------------------
 
@@ -305,6 +306,48 @@ class DiagnosticInterface(ABC):
             if reply.service_id == expected:
                 kept.append(reply)
         return kept
+
+    # -- High-level OBD-II operations --------------------------------------
+    #
+    # Thin delegators, so that both backends literally expose the same high-level API.
+    # The work lives in `canopen_studio.diag.j1979`, which is written once against this
+    # contract; the import is local because that package builds on this module.
+
+    def j1979(self, table: Any = None) -> Any:
+        """
+        The J1979 client for this session, created on first use and then reused.
+
+        Args:
+            table: A `PidTable` to decode with, replacing the current one. Typically the
+                table of a resolved vehicle profile.
+        """
+        from .j1979.client import J1979Client
+
+        if self._j1979 is None:
+            self._j1979 = J1979Client(self, table=table)
+        elif table is not None:
+            self._j1979.table = table
+        return self._j1979
+
+    def supported_pids(self, mode: int = 0x01, refresh: bool = False) -> Any:
+        """Which PIDs of a mode the vehicle implements, discovered from its bitmasks."""
+        return self.j1979().supported_pids(mode, refresh=refresh)
+
+    def read_pid(self, pid: int, mode: int = 0x01, timeout: Optional[float] = None) -> Any:
+        """Read one PID and decode every ECU's answer."""
+        return self.j1979().read_pid(pid, mode, timeout=timeout)
+
+    def read_dtcs(self, kind: str = "stored", timeout: Optional[float] = None) -> Any:
+        """Read the diagnostic trouble codes of one kind."""
+        return self.j1979().read_dtcs(kind, timeout=timeout)
+
+    def read_vin(self, timeout: Optional[float] = None) -> Optional[str]:
+        """Read the vehicle identification number, via mode 09 PID 02."""
+        return self.j1979().read_vin(timeout=timeout)
+
+    def identify(self, timeout: Optional[float] = None) -> Any:
+        """Gather everything the vehicle will say about itself."""
+        return self.j1979().identify(timeout=timeout)
 
 
 def first_payload(replies: Iterable[DiagnosticResponse]) -> Optional[bytes]:
