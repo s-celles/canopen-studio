@@ -402,9 +402,12 @@ class VirtualCanopenSimulator:
                     is_remote_frame=frame.is_remote,
                     is_error_frame=frame.is_error,
                 )
-                self.sim_bus.send(msg)
+                if self.sim_bus is not None:
+                    self.sim_bus.send(msg)
                 
             def py_recv(timeout):
+                if self.sim_bus is None:
+                    return None
                 msg = self.sim_bus.recv(timeout)
                 if msg is not None:
                     return canopen_core.CanFrame(
