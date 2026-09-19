@@ -157,6 +157,18 @@ class TestRustSdo:
         assert msg["is_last"] is True
         assert msg["data"] == b'\xaa\xbb\xcc\xdd\xee\xff\x11'
 
+    def test_sdo_segmented_download_decode(self):
+        # Client Request Segment
+        payload = bytes([0x00 | 0x10 | 0x01, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11])
+        frame = canopen_core.CanFrame(0x605, payload)
+        msg = canopen_core.decode_sdo(frame)
+        assert msg is not None
+        assert msg["type"] == "SEGMENT_DOWNLOAD_REQUEST"
+        assert msg["node_id"] == 5
+        assert msg["toggle"] is True
+        assert msg["is_last"] is True
+        assert msg["data"] == b'\xaa\xbb\xcc\xdd\xee\xff\x11'
+
     def test_sdo_abort_creation_and_decoding(self):
         # 0x06090011 = Sub-index does not exist
         f = canopen_core.build_sdo_abort(node_id=5, index=0x1000, subindex=1, abort_code=0x06090011)
