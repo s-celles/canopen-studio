@@ -52,7 +52,11 @@ impl CanFrame {
     }
 
     /// Create a new standard CAN frame with an explicit microsecond timestamp.
-    pub fn new_with_timestamp(id: u32, payload: &[u8], timestamp_us: u64) -> Result<Self, CanError> {
+    pub fn new_with_timestamp(
+        id: u32,
+        payload: &[u8],
+        timestamp_us: u64,
+    ) -> Result<Self, CanError> {
         if payload.len() > 8 {
             return Err(CanError::InvalidDlc(payload.len()));
         }
@@ -167,12 +171,12 @@ impl CanFrame {
     }
 
     /// Encode into a compact 24-byte binary wire format for ultra-high throughput Rust-to-Rust communication:
-    /// - [0..4]: CAN ID (u32 little-endian)
-    /// - [4]: DLC (u8)
-    /// - [5]: Flags (bit 0: extended, bit 1: remote, bit 2: error)
-    /// - [6..8]: Reserved (u16 0)
-    /// - [8..16]: Payload data (8 bytes)
-    /// - [16..24]: Timestamp µs (u64 little-endian)
+    /// - Bytes 0..4: CAN ID (u32 little-endian)
+    /// - Byte 4: DLC (u8)
+    /// - Byte 5: Flags (bit 0: extended, bit 1: remote, bit 2: error)
+    /// - Bytes 6..8: Reserved (u16 0)
+    /// - Bytes 8..16: Payload data (8 bytes)
+    /// - Bytes 16..24: Timestamp µs (u64 little-endian)
     pub fn to_compact_bytes(&self) -> [u8; 24] {
         let mut buf = [0u8; 24];
         buf[0..4].copy_from_slice(&self.id.to_le_bytes());
@@ -204,8 +208,7 @@ impl CanFrame {
         let mut data = [0u8; 8];
         data.copy_from_slice(&bytes[8..16]);
         let timestamp_us = u64::from_le_bytes([
-            bytes[16], bytes[17], bytes[18], bytes[19],
-            bytes[20], bytes[21], bytes[22], bytes[23],
+            bytes[16], bytes[17], bytes[18], bytes[19], bytes[20], bytes[21], bytes[22], bytes[23],
         ]);
 
         Ok(Self {
@@ -268,7 +271,9 @@ mod tests {
 
     #[test]
     fn test_msgpack_roundtrip_with_python_can() {
-        let frame = CanFrame::new_with_timestamp(0x7DF, &[0x02, 0x01, 0x0D, 0x00], 1_700_000_000_123_456).unwrap();
+        let frame =
+            CanFrame::new_with_timestamp(0x7DF, &[0x02, 0x01, 0x0D, 0x00], 1_700_000_000_123_456)
+                .unwrap();
         let packed = frame.to_python_can_msgpack().unwrap();
         let decoded = CanFrame::from_python_can_msgpack(&packed).unwrap();
 

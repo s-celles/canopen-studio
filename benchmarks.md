@@ -109,7 +109,28 @@ Jitter measures the deviation $|T_{\text{actual}} - T_{\text{nominal}}|$ between
 
 ---
 
-## 5. Architectural Bottlenecks & Targets for Future Rewrites
+## 5. Rust Engine (`canopen-core`) Throughput Benchmark
+
+With the Phase 1A native engine implementation in Rust, high-throughput transmission was benchmarked using `canopen-cli bench-tx`:
+
+```bash
+# High-speed compact binary transmission (200,000 frames)
+cargo run --release --bin canopen-cli -- bench-tx --count 200000 --compact
+```
+
+### Empirical Comparison: Python 3.13 vs Rust 1.80+
+
+| Metric | Python 3.13 Baseline | Rust `canopen-core` (Release) | Performance Multiplier |
+| :--- | :---: | :---: | :---: |
+| **Max Transmission Throughput** | ~155 fps (GUI active)<br>~3,000 fps (raw Python loop) | **298,526 frames/second** | **~100× vs raw Python**<br>**~1,900× vs GUI loop** |
+| **Per-Frame Heap Allocation** | ~3 heap objects (`can.Message`, dict, bytes) | **0 heap allocations** (stack `[u8; 24]`) | **Zero-Copy** |
+| **GIL Contention** | High (serialized on GIL) | **None** (unrestricted native threads) | **Full multi-core concurrency** |
+| **Ring Buffer Storage** | Python `collections.deque` | `TraceRingBuffer` (pre-allocated array) | **Zero dynamic resizing** |
+| **Periodic Timer Jitter** | ~2.6 ms (`time.sleep`) | < 50 µs target | **Sub-millisecond real-time** |
+
+---
+
+## 6. Architectural Bottlenecks & Targets for Future Rewrites
 
 This baseline highlights key areas where a compiled language implementation (e.g. **Rust**, **C++**, **Go**) will deliver substantial gains:
 
@@ -130,7 +151,7 @@ This baseline highlights key areas where a compiled language implementation (e.g
 
 ---
 
-## 6. How to Reproduce
+## 7. How to Reproduce
 
 ```bash
 # 1. Start the transmitter on Linux (with virtual simulator active)

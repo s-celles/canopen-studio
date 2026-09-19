@@ -30,7 +30,12 @@ pub struct UdpCanBus {
 
 impl UdpCanBus {
     /// Bind a UDP CAN bus on the given port (e.g. 1750 or 50000) targeting a destination IP (unicast or broadcast).
-    pub fn new(bind_port: u16, target_host: &str, target_port: u16, use_compact_wire: bool) -> Result<Self, UdpBusError> {
+    pub fn new(
+        bind_port: u16,
+        target_host: &str,
+        target_port: u16,
+        use_compact_wire: bool,
+    ) -> Result<Self, UdpBusError> {
         let domain = Domain::IPV4;
         let sock = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
 
@@ -50,10 +55,9 @@ impl UdpCanBus {
         let socket: UdpSocket = sock.into();
 
         let target_str = format!("{}:{}", target_host, target_port);
-        let target_addr = target_str
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| UdpBusError::InvalidAddress(format!("Cannot resolve destination {}", target_str)))?;
+        let target_addr = target_str.to_socket_addrs()?.next().ok_or_else(|| {
+            UdpBusError::InvalidAddress(format!("Cannot resolve destination {}", target_str))
+        })?;
 
         Ok(Self {
             socket,
@@ -111,7 +115,8 @@ mod tests {
         let bus1 = UdpCanBus::new(port1, "127.0.0.1", port2, false).unwrap();
         let bus2 = UdpCanBus::new(port2, "127.0.0.1", port1, false).unwrap();
 
-        bus2.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        bus2.set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
 
         let tx_frame = CanFrame::new(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]).unwrap();
         bus1.send(&tx_frame).unwrap();

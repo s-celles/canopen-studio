@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Rust High-Performance Core Engine (`crates/canopen-core`)** (Phase 1A):
+  - Compact stack-allocated `CanFrame` (24 bytes) supporting zero heap allocations, microsecond timestamps, and dual serialization (MessagePack `python-can` interop and raw compact binary).
+  - High-throughput `TraceRingBuffer` with snapshotting and filtering by arbitration ID/mask.
+  - Sub-microsecond `LatencyTracker` measuring periodic frame intervals and clock jitter (e.g. 50 Hz SYNC = 20,000 µs nominal) and RTT statistics.
+  - Cross-platform `UdpCanBus` with `SO_REUSEADDR`, `SO_REUSEPORT`, and `SO_BROADCAST`.
+  - CANopen Service Data Object (SDO) client & server protocol engine (CiA 301): expedited upload (read), expedited download (write), and abort code decoding.
+  - Native CANopen service decoders (NMT, SYNC, TIME, EMCY, TPDO1..4, RPDO1..4, TSDO, RSDO, Heartbeat) and OBD-II SAE J1979 Mode 01 PID and DTC decoders.
+  - **PyO3 Python Bindings (`canopen_core`)**: Exposes the compiled Rust core directly to Python (`from canopen_studio import canopen_core`), tested via `tests/test_rust_core.py`.
+- **Rust CLI Tool (`crates/canopen-cli`)**:
+  - `sniff`: Real-time decoded CANopen and OBD-II network monitoring over UDP.
+  - `bench-tx`: High-speed packet generator achieving ~300,000 frames/second.
+  - `latency`: Real-time jitter and latency statistics display.
+- **Justfile Recipes**: `rust-build`, `rust-test`, `rust-python`, and `rust-bench-tx`.
+
 ## [0.5.0] - 2026-09-19
 
 ### Added

@@ -49,7 +49,8 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
     let data = &payload[3..];
 
     match pid {
-        0x04 => { // Calculated engine load (%)
+        0x04 => {
+            // Calculated engine load (%)
             let a = data.first().copied()? as f64;
             Some(ObdPidReading {
                 mode: 1,
@@ -59,7 +60,8 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "%".to_string(),
             })
         }
-        0x05 => { // Engine coolant temperature (°C)
+        0x05 => {
+            // Engine coolant temperature (°C)
             let a = data.first().copied()? as f64;
             Some(ObdPidReading {
                 mode: 1,
@@ -69,8 +71,11 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "°C".to_string(),
             })
         }
-        0x0C => { // Engine speed (RPM)
-            if data.len() < 2 { return None; }
+        0x0C => {
+            // Engine speed (RPM)
+            if data.len() < 2 {
+                return None;
+            }
             let a = data[0] as f64;
             let b = data[1] as f64;
             Some(ObdPidReading {
@@ -81,7 +86,8 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "rpm".to_string(),
             })
         }
-        0x0D => { // Vehicle speed (km/h)
+        0x0D => {
+            // Vehicle speed (km/h)
             let a = data.first().copied()? as f64;
             Some(ObdPidReading {
                 mode: 1,
@@ -91,7 +97,8 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "km/h".to_string(),
             })
         }
-        0x0F => { // Intake air temperature (°C)
+        0x0F => {
+            // Intake air temperature (°C)
             let a = data.first().copied()? as f64;
             Some(ObdPidReading {
                 mode: 1,
@@ -101,7 +108,8 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "°C".to_string(),
             })
         }
-        0x11 => { // Throttle position (%)
+        0x11 => {
+            // Throttle position (%)
             let a = data.first().copied()? as f64;
             Some(ObdPidReading {
                 mode: 1,
@@ -111,8 +119,11 @@ pub fn decode_obd2_mode01_frame(frame: &CanFrame) -> Option<ObdPidReading> {
                 unit: "%".to_string(),
             })
         }
-        0x42 => { // Control module voltage (V)
-            if data.len() < 2 { return None; }
+        0x42 => {
+            // Control module voltage (V)
+            if data.len() < 2 {
+                return None;
+            }
             let a = data[0] as f64;
             let b = data[1] as f64;
             Some(ObdPidReading {
@@ -143,7 +154,10 @@ pub fn format_dtc_bytes(b1: u8, b2: u8) -> Option<String> {
     let digit2 = b1 & 0x0F;
     let digit3 = (b2 >> 4) & 0x0F;
     let digit4 = b2 & 0x0F;
-    Some(format!("{}{:X}{:X}{:X}{:X}", category, digit1, digit2, digit3, digit4))
+    Some(format!(
+        "{}{:X}{:X}{:X}{:X}",
+        category, digit1, digit2, digit3, digit4
+    ))
 }
 
 #[cfg(test)]

@@ -117,3 +117,43 @@ class TestRustDecoders:
         assert res["pid"] == 0x0C
         assert res["value"] == 2000.0
         assert res["unit"] == "rpm"
+
+
+@pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
+class TestRustSdo:
+    def test_sdo_read_request_creation_and_decoding(self):
+        f = canopen_core.build_sdo_read(node_id=5, index=0x1017, subindex=0)
+        assert f.id == 0x605
+        assert f.dlc == 8
+        assert f.data[0] == 0x40  # Initiate upload
+
+        parsed = canopen_core.decode_sdo(f)
+        assert parsed is not None
+        assert parsed["type"] == "UPLOAD_REQUEST"
+        assert parsed["node_id"] == 5
+        assert parsed["index"] == 0x1017
+        assert parsed["subindex"] == 0
+
+    def test_sdo_expedited_write_creation_and_decoding(self):
+        f = canopen_core.build_sdo_write(node_id=5, index=0x1017, subindex=0, data=b"\xE8\x03")
+        assert f.id == 0x605
+        assert f.data[0] == 0x2B  # Expedited 2 bytes
+
+        parsed = canopen_core.decode_sdo(f)
+        assert parsed is not None
+        assert parsed["type"] == "EXPEDITED_DOWNLOAD_REQUEST"
+        assert parsed["node_id"] == 5
+        assert parsed["data"] == b"\xE8\x03"
+
+    def test_sdo_abort_creation_and_decoding(self):
+        # 0x06090011 = Sub-index does not exist
+        f = canopen_core.build_sdo_abort(node_id=5, index=0x1000, subindex=1, abort_code=0x06090011)
+        assert f.id == 0x585
+        assert f.data[0] == 0x80
+
+        parsed = canopen_core.decode_sdo(f)
+        assert parsed is not None
+        assert parsed["type"] == "ABORT"
+        assert parsed["code"] == 0x06090011
+        assert "Sub-index does not exist" in parsed["description"]
+

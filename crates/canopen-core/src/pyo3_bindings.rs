@@ -126,8 +126,8 @@ impl PyCanFrame {
 
     #[staticmethod]
     pub fn from_compact(data: &[u8]) -> PyResult<Self> {
-        let frame = CanFrame::from_compact_bytes(data)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let frame =
+            CanFrame::from_compact_bytes(data).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(PyCanFrame { inner: frame })
     }
 
@@ -275,7 +275,9 @@ impl PyUdpCanBus {
             Err(e) => {
                 // Return None on timeout
                 let err_str = e.to_string();
-                if err_str.contains("timed out") || err_str.contains("Resource temporarily unavailable") {
+                if err_str.contains("timed out")
+                    || err_str.contains("Resource temporarily unavailable")
+                {
                     Ok(None)
                 } else {
                     Err(PyIOError::new_err(err_str))
@@ -306,7 +308,10 @@ pub fn decode_canopen(frame: &PyCanFrame) -> (String, String) {
 
 #[cfg(feature = "python")]
 #[pyfunction]
-pub fn decode_obd2<'py>(py: Python<'py>, frame: &PyCanFrame) -> PyResult<Option<Bound<'py, PyDict>>> {
+pub fn decode_obd2<'py>(
+    py: Python<'py>,
+    frame: &PyCanFrame,
+) -> PyResult<Option<Bound<'py, PyDict>>> {
     if let Some(r) = decode_obd2_mode01_frame(&frame.inner) {
         let d = PyDict::new(py);
         d.set_item("mode", r.mode)?;
@@ -314,6 +319,121 @@ pub fn decode_obd2<'py>(py: Python<'py>, frame: &PyCanFrame) -> PyResult<Option<
         d.set_item("name", r.name)?;
         d.set_item("value", r.value)?;
         d.set_item("unit", r.unit)?;
+        Ok(Some(d))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn build_sdo_read(node_id: u8, index: u16, subindex: u8) -> PyResult<PyCanFrame> {
+    let frame = crate::sdo::build_sdo_read(node_id, index, subindex)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyCanFrame { inner: frame })
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn build_sdo_write(node_id: u8, index: u16, subindex: u8, data: &[u8]) -> PyResult<PyCanFrame> {
+    let frame = crate::sdo::build_sdo_write(node_id, index, subindex, data)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyCanFrame { inner: frame })
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn build_sdo_abort(
+    node_id: u8,
+    index: u16,
+    subindex: u8,
+    abort_code: u32,
+) -> PyResult<PyCanFrame> {
+    let code = crate::sdo::SdoAbortCode::from(abort_code);
+    let frame = crate::sdo::build_sdo_abort(node_id, index, subindex, code)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(PyCanFrame { inner: frame })
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn decode_sdo<'py>(
+    py: Python<'py>,
+    frame: &PyCanFrame,
+) -> PyResult<Option<Bound<'py, PyDict>>> {
+    if let Some(msg) = crate::sdo::parse_sdo_frame(&frame.inner) {
+        let d = PyDict::new(py);
+        match msg {
+            crate::sdo::SdoMessage::UploadRequest {
+                node_id,
+                index,
+                subindex,
+            } => {
+                d.set_item("type", "UPLOAD_REQUEST")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+            }
+            crate::sdo::SdoMessage::ExpeditedUploadResponse {
+                node_id,
+                index,
+                subindex,
+                data,
+            } => {
+                d.set_item("type", "EXPEDITED_UPLOAD_RESPONSE")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+                d.set_item("data", PyBytes::new(py, &data))?;
+            }
+            crate::sdo::SdoMessage::ExpeditedDownloadRequest {
+                node_id,
+                index,
+                subindex,
+                data,
+            } => {
+                d.set_item("type", "EXPEDITED_DOWNLOAD_REQUEST")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+                d.set_item("data", PyBytes::new(py, &data))?;
+            }
+            crate::sdo::SdoMessage::DownloadResponse {
+                node_id,
+                index,
+                subindex,
+            } => {
+                d.set_item("type", "DOWNLOAD_RESPONSE")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+            }
+            crate::sdo::SdoMessage::Abort {
+                node_id,
+                index,
+                subindex,
+                code,
+            } => {
+                d.set_item("type", "ABORT")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+                d.set_item("code", code.code())?;
+                d.set_item("description", code.description())?;
+            }
+            crate::sdo::SdoMessage::Other {
+                node_id,
+                cs,
+                index,
+                subindex,
+            } => {
+                d.set_item("type", "OTHER")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("cs", cs)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+            }
+        }
         Ok(Some(d))
     } else {
         Ok(None)
@@ -330,6 +450,10 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyUdpCanBus>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sdo_write, m)?)?;
+    m.add_function(wrap_pyfunction!(build_sdo_abort, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_sdo, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

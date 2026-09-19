@@ -36,13 +36,32 @@ pub enum CanopenService {
     NmtCommand,
     Sync,
     Time,
-    Emergency { node_id: u8, err_code: u16, err_reg: u8 },
-    Tpdo { pdo_num: u8, node_id: u8 },
-    Rpdo { pdo_num: u8, node_id: u8 },
-    Tsdo { node_id: u8 },
-    Rsdo { node_id: u8 },
-    Heartbeat { node_id: u8, state: NmtState },
-    Other { id: u32 },
+    Emergency {
+        node_id: u8,
+        err_code: u16,
+        err_reg: u8,
+    },
+    Tpdo {
+        pdo_num: u8,
+        node_id: u8,
+    },
+    Rpdo {
+        pdo_num: u8,
+        node_id: u8,
+    },
+    Tsdo {
+        node_id: u8,
+    },
+    Rsdo {
+        node_id: u8,
+    },
+    Heartbeat {
+        node_id: u8,
+        state: NmtState,
+    },
+    Other {
+        id: u32,
+    },
 }
 
 /// Decoded CANopen message metadata.
@@ -103,7 +122,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
                 err_code,
                 err_reg,
             },
-            description: format!("EMCY Node {} (Code: 0x{:04X}, Reg: 0x{:02X})", node_id, err_code, err_reg),
+            description: format!(
+                "EMCY Node {} (Code: 0x{:04X}, Reg: 0x{:02X})",
+                node_id, err_code, err_reg
+            ),
         };
     }
 
@@ -111,7 +133,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x181..=0x1FF).contains(&id) {
         let node_id = (id - 0x180) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Tpdo { pdo_num: 1, node_id },
+            service: CanopenService::Tpdo {
+                pdo_num: 1,
+                node_id,
+            },
             description: format!("TPDO1 Node {}", node_id),
         };
     }
@@ -120,7 +145,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x201..=0x27F).contains(&id) {
         let node_id = (id - 0x200) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Rpdo { pdo_num: 1, node_id },
+            service: CanopenService::Rpdo {
+                pdo_num: 1,
+                node_id,
+            },
             description: format!("RPDO1 Node {}", node_id),
         };
     }
@@ -129,7 +157,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x281..=0x2FF).contains(&id) {
         let node_id = (id - 0x280) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Tpdo { pdo_num: 2, node_id },
+            service: CanopenService::Tpdo {
+                pdo_num: 2,
+                node_id,
+            },
             description: format!("TPDO2 Node {}", node_id),
         };
     }
@@ -138,7 +169,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x301..=0x37F).contains(&id) {
         let node_id = (id - 0x300) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Rpdo { pdo_num: 2, node_id },
+            service: CanopenService::Rpdo {
+                pdo_num: 2,
+                node_id,
+            },
             description: format!("RPDO2 Node {}", node_id),
         };
     }
@@ -147,7 +181,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x381..=0x3FF).contains(&id) {
         let node_id = (id - 0x380) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Tpdo { pdo_num: 3, node_id },
+            service: CanopenService::Tpdo {
+                pdo_num: 3,
+                node_id,
+            },
             description: format!("TPDO3 Node {}", node_id),
         };
     }
@@ -156,7 +193,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x401..=0x47F).contains(&id) {
         let node_id = (id - 0x400) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Rpdo { pdo_num: 3, node_id },
+            service: CanopenService::Rpdo {
+                pdo_num: 3,
+                node_id,
+            },
             description: format!("RPDO3 Node {}", node_id),
         };
     }
@@ -165,7 +205,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x481..=0x4FF).contains(&id) {
         let node_id = (id - 0x480) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Tpdo { pdo_num: 4, node_id },
+            service: CanopenService::Tpdo {
+                pdo_num: 4,
+                node_id,
+            },
             description: format!("TPDO4 Node {}", node_id),
         };
     }
@@ -174,7 +217,10 @@ pub fn decode_canopen_frame(frame: &CanFrame) -> CanopenMessageInfo {
     if (0x501..=0x57F).contains(&id) {
         let node_id = (id - 0x500) as u8;
         return CanopenMessageInfo {
-            service: CanopenService::Rpdo { pdo_num: 4, node_id },
+            service: CanopenService::Rpdo {
+                pdo_num: 4,
+                node_id,
+            },
             description: format!("RPDO4 Node {}", node_id),
         };
     }
@@ -249,6 +295,12 @@ mod tests {
     fn test_decode_tpdo1() {
         let frame = CanFrame::new(0x181, &[0x01, 0x02]).unwrap(); // Node 1
         let info = decode_canopen_frame(&frame);
-        assert_eq!(info.service, CanopenService::Tpdo { pdo_num: 1, node_id: 1 });
+        assert_eq!(
+            info.service,
+            CanopenService::Tpdo {
+                pdo_num: 1,
+                node_id: 1
+            }
+        );
     }
 }
