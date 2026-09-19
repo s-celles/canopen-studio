@@ -41,7 +41,7 @@ export component MainWindow inherits Window {
                 alignment: start;
                 
                 Text { text: "Interface:"; vertical-alignment: center; color: Palette.foreground; }
-                ComboBox { model: ["Virtual Simulator", "UDP Multicast", "SocketCAN"]; current-index: 1; width: 140px; }
+                ComboBox { model: ["Virtual Simulator", "UDP Multicast", "SocketCAN"]; current-index: 0; width: 140px; }
                 
                 Text { text: "Channel:"; vertical-alignment: center; color: Palette.foreground; }
                 ComboBox { model: ["127.0.0.1:1750", "224.0.0.1:1750", "can0"]; current-index: 0; width: 130px; }
@@ -291,6 +291,77 @@ export component MainWindow inherits Window {
                 }
             }
             Tab { title: "📖 SDO Object Dictionary"; Text { text: "Dictionary Explorer (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
+            Tab { 
+                title: "🩺 OBD-II Diagnostics"; 
+                VerticalLayout {
+                    padding: 10px; spacing: 10px; alignment: start;
+                    
+                    // Connection
+                    Rectangle {
+                        border-width: 1px; border-color: Palette.border; background: Palette.control-background;
+                        VerticalLayout {
+                            padding: 10px; spacing: 10px;
+                            Text { text: "Diagnostic Link"; font-weight: 700; color: Palette.foreground; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "Adapter:"; vertical-alignment: center; color: Palette.foreground; }
+                                ComboBox { model: ["ELM327 — serial / Bluetooth SPP", "ELM327 — Wi-Fi / TCP", "Native CAN (ISO-TP over the connected bus)"]; current-index: 0; width: 220px; }
+                                Text { text: "Port / Host:"; vertical-alignment: center; color: Palette.foreground; }
+                                LineEdit { text: "/dev/ttyUSB0"; width: 120px; }
+                                Text { text: "Baud:"; vertical-alignment: center; color: Palette.foreground; }
+                                LineEdit { text: "38400"; width: 80px; }
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Text { text: "Protocol:"; vertical-alignment: center; color: Palette.foreground; }
+                                ComboBox { model: ["0 — autodetect", "6 — ISO 15765-4 CAN 11-bit, 500 kbaud"]; current-index: 0; width: 220px; }
+                                Text { text: "Profile:"; vertical-alignment: center; color: Palette.foreground; }
+                                ComboBox { model: ["Auto"]; current-index: 0; width: 120px; }
+                                Button { text: "🔌 Connect"; }
+                            }
+                            Text { text: "Not connected."; color: #a0a0a0; font-family: "monospace"; }
+                        }
+                    }
+
+                    // Vehicle Identity
+                    Rectangle {
+                        border-width: 1px; border-color: Palette.border; background: Palette.control-background;
+                        VerticalLayout {
+                            padding: 10px;
+                            Text { text: "Vehicle"; font-weight: 700; color: Palette.foreground; }
+                            Text { text: "Connect to read the VIN, the ECUs and the profile the vehicle resolves to."; color: Palette.foreground; font-family: "monospace"; }
+                        }
+                    }
+
+                    // Live Parameters
+                    Rectangle {
+                        border-width: 1px; border-color: Palette.border; background: Palette.control-background;
+                        VerticalLayout {
+                            padding: 10px; spacing: 10px;
+                            Text { text: "Supported Parameters"; font-weight: 700; color: Palette.foreground; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button { text: "🔍 Discover"; }
+                                Button { text: "📊 Read All"; }
+                                Button { text: "↻ Read Selected"; }
+                            }
+                            StandardTableView {
+                                height: 180px;
+                                columns: [
+                                    { title: "PID", width: 70px },
+                                    { title: "Parameter", width: 230px },
+                                    { title: "Value", width: 110px },
+                                    { title: "Unit", width: 70px },
+                                ];
+                                rows: [
+                                    [ { text: "0C" }, { text: "Engine RPM" }, { text: "--" }, { text: "rpm" } ],
+                                    [ { text: "0D" }, { text: "Vehicle Speed" }, { text: "--" }, { text: "km/h" } ],
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
             Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Hardware State & Errors (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
             Tab { title: "📚 CANopen Reference"; Text { text: "Documentation (Planned)"; color: Palette.foreground; horizontal-alignment: center; vertical-alignment: center; } }
         }
