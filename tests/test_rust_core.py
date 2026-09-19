@@ -196,3 +196,23 @@ class TestRustIsoTp:
         assert data3 == vin_resp
 
 
+@pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
+class TestRustPdo:
+    def test_pdo_mapping_encode_and_decode(self):
+        mapping = canopen_core.PdoMapping(0x181, "CiA402_TPDO1")
+        mapping.add_signal("Velocity", 0, 32, signal_type="int32", factor=1.0, offset=0.0, unit="rpm")
+        mapping.add_signal("StatusWord", 32, 16, signal_type="uint16", factor=1.0, offset=0.0, unit="raw")
+
+        frame = mapping.encode_frame([("Velocity", -2500.0), ("StatusWord", 0x0237)])
+        assert frame.id == 0x181
+
+        readings = mapping.decode_frame(frame)
+        assert len(readings) == 2
+        assert readings[0]["name"] == "Velocity"
+        assert readings[0]["value"] == -2500.0
+        assert readings[0]["unit"] == "rpm"
+        assert readings[1]["name"] == "StatusWord"
+        assert readings[1]["value"] == 0x0237
+
+
+

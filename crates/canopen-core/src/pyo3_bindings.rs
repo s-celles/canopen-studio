@@ -491,6 +491,81 @@ pub fn fragment_isotp(tx_id: u32, data: &[u8]) -> PyResult<Vec<PyCanFrame>> {
         .collect())
 }
 
+#[cfg(feature = "python")]
+#[pyclass(name = "PdoMapping")]
+pub struct PyPdoMapping {
+    inner: crate::pdo::PdoMapping,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyPdoMapping {
+    #[new]
+    pub fn new(cob_id: u32, name: &str) -> Self {
+        Self {
+            inner: crate::pdo::PdoMapping::new(cob_id, name),
+        }
+    }
+
+    #[pyo3(signature = (name, bit_start, bit_length, signal_type="uint16", factor=1.0, offset=0.0, unit=""))]
+    pub fn add_signal(
+        &mut self,
+        name: &str,
+        bit_start: u8,
+        bit_length: u8,
+        signal_type: &str,
+        factor: f64,
+        offset: f64,
+        unit: &str,
+    ) -> PyResult<()> {
+        let st = match signal_type.to_lowercase().as_str() {
+            "bool" => crate::pdo::SignalType::Bool,
+            "uint8" => crate::pdo::SignalType::Uint8,
+            "int8" => crate::pdo::SignalType::Int8,
+            "uint16" => crate::pdo::SignalType::Uint16,
+            "int16" => crate::pdo::SignalType::Int16,
+            "uint32" => crate::pdo::SignalType::Uint32,
+            "int32" => crate::pdo::SignalType::Int32,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "Unsupported signal type: {}",
+                    other
+                )))
+            }
+        };
+        self.inner.add_signal(crate::pdo::SignalDefinition::new(
+            name, bit_start, bit_length, st, factor, offset, unit,
+        ));
+        Ok(())
+    }
+
+    pub fn decode_frame<'py>(
+        &self,
+        py: Python<'py>,
+        frame: &PyCanFrame,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let readings = self.inner.decode_frame(&frame.inner);
+        let mut results = Vec::with_capacity(readings.len());
+        for r in readings {
+            let d = PyDict::new(py);
+            d.set_item("name", r.name)?;
+            d.set_item("value", r.value)?;
+            d.set_item("unit", r.unit)?;
+            results.push(d);
+        }
+        Ok(results)
+    }
+
+    pub fn encode_frame(&self, values: Vec<(String, f64)>) -> PyResult<PyCanFrame> {
+        let slice: Vec<(&str, f64)> = values.iter().map(|(n, v)| (n.as_str(), *v)).collect();
+        let frame = self
+            .inner
+            .encode_frame(&slice)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyCanFrame { inner: frame })
+    }
+}
+
 /// PyO3 C-Python module definition.
 #[cfg(feature = "python")]
 #[pymodule]
@@ -500,6 +575,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTraceRingBuffer>()?;
     m.add_class::<PyUdpCanBus>()?;
     m.add_class::<PyIsoTpReassembler>()?;
+    m.add_class::<PyPdoMapping>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;
