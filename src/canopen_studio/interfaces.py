@@ -8,6 +8,7 @@ Copyright (C) 2026 Sébastien Celles
 """
 
 import os
+import socket
 import time
 import threading
 from typing import Dict, List, Optional, Any
@@ -143,6 +144,27 @@ def resolve_udp_hop_limit(hop_limit: Optional[int] = None) -> int:
         return DEFAULT_UDP_HOP_LIMIT
 
 
+def _detect_local_ip(target_ip: str = "8.8.8.8") -> Optional[str]:
+    """Detect the active local network interface IP routed towards LAN/Internet."""
+    for probe_dest in [target_ip, "1.1.1.1", "8.8.8.8"]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect((probe_dest, 80))
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith("127."):
+                return ip
+        except Exception:
+            pass
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return None
+
+
 def open_can_bus(
     interface_key: str,
     channel: str,
@@ -195,7 +217,28 @@ def open_can_bus(
             except ValueError:
                 pass
 
-    return can.Bus(**kwargs)
+    bus = can.Bus(**kwargs)
+
+    if backend == "udp_multicast":
+        try:
+            mcast = getattr(bus, "_multicast", None)
+            sock = getattr(mcast, "_socket", None)
+            if sock and getattr(mcast, "ip_version", 4) == 4:
+                group = getattr(mcast, "group", "224.0.0.1")
+                local_ip = os.environ.get("CANOPEN_UDP_IF") or _detect_local_ip(group)
+                if local_ip and local_ip != "0.0.0.0" and not local_ip.startswith("127."):
+                    ip_bin = socket.inet_aton(local_ip)
+                    # Bind outgoing multicast packets to this network interface (prevents Errno 65 on macOS)
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, ip_bin)
+                    try:
+                        group_bin = socket.inet_pton(socket.AF_INET, group)
+                        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group_bin + ip_bin)
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+
+    return bus
 
 
 class VirtualCanopenSimulator:
