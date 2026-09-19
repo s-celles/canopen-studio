@@ -1,173 +1,258 @@
-import { Button, CheckBox, ComboBox, LineEdit } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, TabWidget, StandardTableView } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
-    width: 1000px;
-    height: 700px;
-    title: "CAN & CANopen Studio";
+    width: 1150px;
+    height: 800px;
+    title: "CAN & CANopen Studio - Universal Protocol Analyzer & Transmit Station";
+    background: #f0f0f0;
 
     in-out property <int> rpm: 0;
+    in-out property <int> torque: 0;
+    in-out property <int> temp_inv: 0;
+    in-out property <int> temp_motor: 0;
     in-out property <string> nmt_state: "Pre-Operational";
-    in-out property <string> connection_status: "Connected";
-    in-out property <int> active_tab: 0; 
-    in-out property <string> plot_path: "";
     in-out property <int> trace_count: 0;
+    
+    in-out property <string> connection_status: "Connected: virtual_bus";
+    in-out property <string> bus_rate: "0 msgs/s";
+    in-out property <int> total_rx: 0;
+    in-out property <int> active_nodes: 0;
+    
+    in-out property <string> plot_path_b0: "";
+    in-out property <string> plot_path_b1: "";
+    
+    in-out property <[[StandardListViewItem]]> nodes_model: [
+        [ { text: "Node 1" }, { text: "Operational" }, { text: "0.0s ago" }, { text: "HEARTBEAT, TPDO" } ],
+        [ { text: "Node 2" }, { text: "Pre-Operational" }, { text: "1.0s ago" }, { text: "HEARTBEAT" } ]
+    ];
 
     VerticalLayout {
         // TOP BAR
         Rectangle {
-            height: 60px;
-            background: #2a2a35;
+            height: 50px;
+            background: #f8f8f8;
+            border-color: #d0d0d0;
+            border-width: 1px;
             
             HorizontalLayout {
                 padding: 10px;
-                spacing: 15px;
+                spacing: 10px;
                 alignment: start;
                 
-                Text { text: "Interface:"; vertical-alignment: center; color: white; }
-                ComboBox { model: ["UDP Multicast", "SocketCAN", "Virtual"]; current-index: 0; width: 150px; }
+                Text { text: "Interface:"; vertical-alignment: center; }
+                ComboBox { model: ["Virtual Simulator", "UDP Multicast", "SocketCAN"]; current-index: 1; width: 140px; }
                 
-                Text { text: "Channel:"; vertical-alignment: center; color: white; }
-                LineEdit { text: "127.0.0.1:1750"; width: 150px; }
+                Text { text: "Channel:"; vertical-alignment: center; }
+                ComboBox { model: ["127.0.0.1:1750", "224.0.0.1:1750", "can0"]; current-index: 0; width: 130px; }
+                
+                Text { text: "Bitrate:"; vertical-alignment: center; }
+                ComboBox { model: ["500000", "250000", "1000000"]; current-index: 0; width: 90px; }
 
-                CheckBox { text: "Simulate"; checked: true; }
-                Button { text: "Connect"; primary: true; }
+                Text { text: "Profile:"; vertical-alignment: center; }
+                ComboBox { model: ["All / Auto", "CiA 402", "SEVCON"]; current-index: 0; width: 100px; }
+
+                Button { text: "Disconnect"; }
                 
                 Rectangle { horizontal-stretch: 1; }
                 
                 Text {
-                    text: "Status: " + root.connection_status;
-                    color: root.connection_status == "Connected" ? #a6e3a1 : #f38ba8;
-                    font-weight: 700;
+                    text: root.connection_status;
+                    color: root.connection_status != "Disconnected" ? #228b22 : #ff0000;
                     vertical-alignment: center;
                 }
+                
+                Button { text: "i About"; }
             }
         }
         
-        HorizontalLayout {
-            // SIDEBAR TABS
-            Rectangle {
-                width: 200px;
-                background: #1e1e2e;
-                
+        TabWidget {
+            Tab {
+                title: "🌐 Network & Dashboard";
                 VerticalLayout {
                     padding: 10px;
-                    spacing: 5px;
-                    
-                    Rectangle {
-                        height: 40px;
-                        background: root.active_tab == 0 ? #313244 : transparent;
-                        border-radius: 6px;
-                        Text { text: "🌐 Dashboard"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 0 ? 700 : 400; }
-                        TouchArea { clicked => { root.active_tab = 0; } }
-                    }
-                    Rectangle {
-                        height: 40px;
-                        background: root.active_tab == 1 ? #313244 : transparent;
-                        border-radius: 6px;
-                        Text { text: "📈 Plotter"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 1 ? 700 : 400; }
-                        TouchArea { clicked => { root.active_tab = 1; } }
-                    }
-                    Rectangle {
-                        height: 40px;
-                        background: root.active_tab == 2 ? #313244 : transparent;
-                        border-radius: 6px;
-                        Text { text: "📋 Real-time Trace"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 2 ? 700 : 400; }
-                        TouchArea { clicked => { root.active_tab = 2; } }
-                    }
-                    Rectangle { vertical-stretch: 1; }
-                }
-            }
-            
-            // CONTENT AREA
-            Rectangle {
-                background: #181825;
-                
-                // DASHBOARD VIEW
-                if root.active_tab == 0 : VerticalLayout {
-                    padding: 40px;
-                    spacing: 30px;
-                    alignment: start;
-
-                    Text { text: "CANopen Node 1 (SEVCON Gen4)"; font-size: 28px; font-weight: 700; color: white; }
-
-                    HorizontalLayout {
-                        spacing: 20px;
-                        
-                        Rectangle {
-                            background: #1e1e2e;
-                            border-radius: 12px;
-                            height: 150px;
-                            width: 250px;
-                            VerticalLayout {
-                                alignment: center;
-                                Text { text: root.rpm + " RPM"; font-size: 42px; font-weight: 800; color: #a6e3a1; horizontal-alignment: center; }
-                                Text { text: "Motor Speed"; font-size: 16px; color: #a6adc8; horizontal-alignment: center; }
-                            }
-                        }
-                        
-                        Rectangle {
-                            background: #1e1e2e;
-                            border-radius: 12px;
-                            height: 150px;
-                            width: 250px;
-                            VerticalLayout {
-                                alignment: center;
-                                Text { text: root.nmt_state; font-size: 32px; font-weight: 800; color: root.nmt_state == "Operational" ? #a6e3a1 : #f9e2af; horizontal-alignment: center; }
-                                Text { text: "NMT State"; font-size: 16px; color: #a6adc8; horizontal-alignment: center; }
-                            }
-                        }
-                    }
-                }
-                
-                // PLOTTER VIEW
-                if root.active_tab == 1 : VerticalLayout {
-                    padding: 20px;
                     spacing: 10px;
                     
-                    Text { text: "Live RPM Telemetry (0x606C)"; font-size: 20px; color: white; font-weight: 700; }
-                    
+                    // Bus Statistics
                     Rectangle {
-                        background: #1e1e2e;
-                        border-radius: 8px;
+                        height: 35px;
+                        background: #ffffff;
+                        border-color: #e0e0e0;
                         border-width: 1px;
-                        border-color: #45475a;
-                        clip: true;
-                        
-                        // Y-Axis labels
-                        Text { text: "4000"; color: #6c7086; x: 5px; y: 10px; font-size: 12px; }
-                        Text { text: "2000"; color: #6c7086; x: 5px; y: 140px; font-size: 12px; }
-                        Text { text: "0"; color: #6c7086; x: 5px; y: 270px; font-size: 12px; }
-                        
-                        // The actual path
-                        Path {
-                            commands: root.plot_path;
-                            stroke: #89b4fa;
-                            stroke-width: 2px;
+                        HorizontalLayout {
+                            padding-left: 15px;
+                            padding-right: 15px;
+                            spacing: 30px;
+                            alignment: start;
+                            Text { text: "Bus Rate: " + root.bus_rate; color: #0066cc; font-weight: 700; vertical-alignment: center; }
+                            Text { text: "Total Received: " + root.total_rx; vertical-alignment: center; }
+                            Text { text: "Total Transmitted: 0"; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Text { text: "Active Nodes: " + root.active_nodes; color: #228b22; font-weight: 700; vertical-alignment: center; }
                         }
                     }
-                }
-                
-                // TRACE VIEW
-                if root.active_tab == 2 : VerticalLayout {
-                    padding: 20px;
-                    spacing: 15px;
                     
-                    Text { text: "Network Trace (Total: " + root.trace_count + " frames)"; color: white; font-size: 20px; font-weight: 700; }
-                    
-                    Rectangle {
-                        background: #1e1e2e;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: #45475a;
+                    HorizontalLayout {
+                        spacing: 10px;
                         
+                        // Left: Discovered Nodes
                         VerticalLayout {
-                            padding: 15px;
-                            Text { text: "Fast live tracing requires ListView / Model rendering in Slint."; color: #a6adc8; }
-                            Text { text: "Currently tracking count in backend."; color: #a6adc8; }
+                            width: 500px;
+                            Text { text: "Discovered CANopen Network Nodes (CiA 301)"; font-size: 13px; color: #555555; }
+                            Rectangle { height: 5px; }
+                            StandardTableView {
+                                columns: [
+                                    { title: "Node ID" },
+                                    { title: "NMT State" },
+                                    { title: "Last Seen" },
+                                    { title: "Active Services" }
+                                ];
+                                rows: root.nodes_model;
+                            }
+                        }
+                        
+                        // Right: Dynamic Telemetry
+                        VerticalLayout {
+                            Text { text: "Dynamic Telemetry (CiA 402 / SEVCON)"; font-size: 13px; color: #555555; }
+                            Rectangle { height: 5px; }
+                            
+                            GridLayout {
+                                spacing: 15px;
+                                
+                                Rectangle {
+                                    col: 0; row: 0;
+                                    background: #ffffff;
+                                    border-color: #e0e0e0;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: "Motor Speed (0x606C)"; font-size: 11px; color: #666; }
+                                        Text { text: root.rpm + " RPM"; font-size: 32px; font-weight: 700; color: #0078d7; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
+                                        Text { text: "Max: 5000 RPM"; font-size: 11px; color: #666; horizontal-alignment: center; }
+                                    }
+                                }
+                                
+                                Rectangle {
+                                    col: 1; row: 0;
+                                    background: #ffffff;
+                                    border-color: #e0e0e0;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: "Target Torque / Status"; font-size: 11px; color: #666; }
+                                        Text { text: root.torque; font-size: 32px; font-weight: 700; color: #d9534f; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
+                                        Text { text: "State: Operation Enabled"; font-size: 11px; color: #666; horizontal-alignment: center; }
+                                    }
+                                }
+                                
+                                Rectangle {
+                                    col: 0; row: 1;
+                                    background: #ffffff;
+                                    border-color: #e0e0e0;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: "Inverter / Heatsink Temp"; font-size: 11px; color: #666; }
+                                        Text { text: root.temp_inv + " °C"; font-size: 32px; font-weight: 700; color: #f0ad4e; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
+                                    }
+                                }
+                                
+                                Rectangle {
+                                    col: 1; row: 1;
+                                    background: #ffffff;
+                                    border-color: #e0e0e0;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: "Motor Temperature"; font-size: 11px; color: #666; }
+                                        Text { text: root.temp_motor; font-size: 32px; font-weight: 700; color: #5cb85c; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
+            Tab {
+                title: "📈 Reverse Plotter";
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 10px;
+                    
+                    // Toolbar
+                    Rectangle {
+                        height: 40px;
+                        HorizontalLayout {
+                            spacing: 10px;
+                            alignment: start;
+                            
+                            Text { text: "Target Mode:"; vertical-alignment: center; }
+                            ComboBox { model: ["CAN ID (Raw Bytes)", "Decoded Signal"]; current-index: 0; width: 150px; }
+                            
+                            Text { text: "Target ID / Signal:"; vertical-alignment: center; }
+                            ComboBox { model: ["0x473"]; current-index: 0; width: 120px; }
+                            
+                            Text { text: "Format:"; vertical-alignment: center; }
+                            ComboBox { model: ["All Bytes (B0..B7)"]; current-index: 0; width: 140px; }
+                            
+                            Button { text: "Pause Plot"; }
+                            Button { text: "Clear"; }
+                        }
+                    }
+                    
+                    // Graph Area (Dark background like matplotlib dark_background)
+                    Rectangle {
+                        background: #1e1e1e;
+                        border-width: 1px;
+                        border-color: #444;
+                        
+                        VerticalLayout {
+                            padding: 10px;
+                            Text { text: "CAN ID: 0x473 (SEVCON TPDO5 (Actual Speed 0x606C & Max Speed))"; color: white; horizontal-alignment: center; }
+                            Text { text: "Payload Bytes 0..7"; color: white; horizontal-alignment: center; font-size: 11px; }
+                            
+                            Rectangle {
+                                clip: true;
+                                Path {
+                                    commands: root.plot_path_b0;
+                                    stroke: #00BFFF; // Blue
+                                    stroke-width: 1.5px;
+                                }
+                                Path {
+                                    commands: root.plot_path_b1;
+                                    stroke: #32CD32; // Green
+                                    stroke-width: 1.5px;
+                                }
+                                // Labels
+                                Text { text: "250 -"; color: #888; y: 10px; x: 10px; }
+                                Text { text: "200 -"; color: #888; y: parent.height * 0.2; x: 10px; }
+                                Text { text: "150 -"; color: #888; y: parent.height * 0.4; x: 10px; }
+                                Text { text: "100 -"; color: #888; y: parent.height * 0.6; x: 10px; }
+                                Text { text: " 50 -"; color: #888; y: parent.height * 0.8; x: 10px; }
+                                Text { text: "  0 -"; color: #888; y: parent.height * 0.95; x: 10px; }
+                                
+                                // Fake Legend
+                                Rectangle {
+                                    x: 60px; y: 10px; width: 80px; height: 120px;
+                                    background: #222; border-color: #555; border-width: 1px;
+                                    VerticalLayout {
+                                        padding: 5px; spacing: 2px;
+                                        HorizontalLayout { spacing: 5px; alignment: start; Rectangle { width: 15px; height: 2px; background: #00BFFF; } Text { text: "B0"; color: white; font-size: 10px;} }
+                                        HorizontalLayout { spacing: 5px; alignment: start; Rectangle { width: 15px; height: 2px; background: #32CD32; } Text { text: "B1"; color: white; font-size: 10px;} }
+                                        HorizontalLayout { spacing: 5px; alignment: start; Rectangle { width: 15px; height: 2px; background: #DAA520; } Text { text: "B2"; color: white; font-size: 10px;} }
+                                        HorizontalLayout { spacing: 5px; alignment: start; Rectangle { width: 15px; height: 2px; background: #FF4500; } Text { text: "B3"; color: white; font-size: 10px;} }
+                                        HorizontalLayout { spacing: 5px; alignment: start; Rectangle { width: 15px; height: 2px; background: #9370DB; } Text { text: "B4"; color: white; font-size: 10px;} }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Tab { title: "📋 Real-time Trace"; Text { text: "Under Construction"; } }
+            Tab { title: "🚀 Transmit & Control"; Text { text: "Under Construction"; } }
+            Tab { title: "📖 SDO Object Dictionary"; Text { text: "Under Construction"; } }
+            Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Under Construction"; } }
+            Tab { title: "📚 CANopen Reference"; Text { text: "Under Construction"; } }
         }
     }
 }

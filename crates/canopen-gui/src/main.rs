@@ -93,7 +93,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             ui.set_nmt_state(nmt.into());
                             ui.set_trace_count(total_trace);
                             if !path.is_empty() {
-                                ui.set_plot_path(path.into());
+                                ui.set_plot_path_b0(path.into());
                             }
                         });
                     }
