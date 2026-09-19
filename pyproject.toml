@@ -77,6 +77,14 @@ packages = [
 [tool.setuptools.dynamic]
 version = { attr = "canopen_studio.__version__" }
 
+[tool.pytest.ini_options]
+markers = [
+    # Integration tests against Ircama's ELM327-emulator. Skipped unless it is installed,
+    # which is opt-in because of its CC-BY-NC-SA-4.0 licence:
+    #   uv run --with ELM327-emulator pytest -m emulator
+    "emulator: needs Ircama's ELM327-emulator, which is not a dev dependency",
+]
+
 [tool.mypy]
 ignore_missing_imports = true
 disable_error_code = ["attr-defined", "valid-type", "assignment", "operator", "no-any-return", "union-attr"]
