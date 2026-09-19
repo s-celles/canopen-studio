@@ -18,7 +18,13 @@ dependencies = [
     "fastmcp>=2.0",
     "a2a-sdk>=0.2",
     "fastapi[standard]>=0.115",
+    "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+# Importing manufacturer signal definitions from a DBC database. Optional because the
+# generic J1979 profile, and every profile written by hand, works without it.
+dbc = ["cantools>=39.0"]
 
 [dependency-groups]
 dev = [
@@ -57,7 +63,14 @@ packages = [
     "canopen_studio.stack.decoders",
     "canopen_studio.diag",
     "canopen_studio.diag.elm327",
+    "canopen_studio.diag.j1979",
+    "canopen_studio.diag.profiles",
+    "canopen_studio.diag.profiles.importers",
 ]
+
+[tool.setuptools.package-data]
+# Declarative PID tables and vehicle profiles ship with the package.
+"canopen_studio.diag.profiles" = ["data/*.yaml", "data/**/*.yaml"]
 
 [tool.setuptools.dynamic]
 version = { attr = "canopen_studio.__version__" }
