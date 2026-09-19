@@ -5,7 +5,8 @@ Reading a PID asks an ECU a question. Writing to one changes a car that people d
 some of those changes cannot be undone from a laptop. So everything in this package reads
 by default, and anything that does not has to come through here.
 
-Three independent gates, all of which must open:
+Four independent gates, all of which must open — the fourth only for a request
+arriving through MCP:
 
 A kill switch
     `CANOPEN_STUDIO_DIAG_WRITE` must be set. It is off by default, following the same
@@ -24,7 +25,7 @@ An explicit confirmation
 
 **The UDS write services have no request path in this release.** `WriteDataByIdentifier`
 (0x2E), `RoutineControl` (0x31) and `InputOutputControlByIdentifier` (0x2F) are refused
-here even with all three gates open, because nothing in this package can send them. The
+here even with all the gates open, because nothing in this package can send them. The
 gate exists so that adding one later is a matter of calling `check()` — and so that the
 refusal is explicit rather than an accident of what happens not to be written yet.
 
@@ -33,7 +34,12 @@ what a diagnostic tool is for. It still needs the kill switch and a confirmation
 erases the readiness monitors, which a vehicle then needs a full drive cycle to rebuild,
 and an emissions test taken before that fails.
 
-None of these are exposed as MCP tools. An agent reads.
+A fourth gate for agents
+    A write requested through MCP passes everything above *and* `CANOPEN_STUDIO_MCP_DIAG_WRITE`,
+    which is separate from the process-level switch on purpose. Enabling writes so that a
+    person can clear codes from the GUI must not, by itself, hand that capability to
+    whatever model is connected to the server. Both have to be set, and the refusal names
+    whichever one is missing.
 
 Author: Sébastien Celles
 License: GNU General Public License v3.0 (GPL-3.0-or-later)
@@ -50,6 +56,10 @@ from .interface import DiagnosticError, DiagnosticInterface
 
 # Setting this enables the write path at all. Off by default, like CANOPEN_STUDIO_A2A.
 WRITE_ENABLED_ENV = "CANOPEN_STUDIO_DIAG_WRITE"
+
+# And this one additionally allows a write requested through MCP. Kept separate so that
+# enabling writes for a person at the GUI does not silently enable them for an agent.
+AGENT_WRITE_ENABLED_ENV = "CANOPEN_STUDIO_MCP_DIAG_WRITE"
 
 # UDS services that modify an ECU. Named here so a refusal can say which one it refused.
 WRITE_SERVICES: Dict[int, str] = {
@@ -83,6 +93,21 @@ def service_name(service: int) -> str:
 def writes_enabled() -> bool:
     """Whether the process-level kill switch has been opened."""
     return _sec.env_flag(WRITE_ENABLED_ENV, default=False)
+
+
+def agent_writes_enabled() -> bool:
+    """Whether writes requested through MCP are additionally allowed."""
+    return _sec.env_flag(AGENT_WRITE_ENABLED_ENV, default=False)
+
+
+def agent_write_warning() -> str:
+    """The sentence shown wherever an agent is able to write, so it is never a surprise."""
+    return (
+        f"WARNING: {AGENT_WRITE_ENABLED_ENV} is set — an AI agent connected to this server "
+        f"can clear diagnostic trouble codes on the connected vehicle. Clearing also erases "
+        f"the readiness monitors, which need a full drive cycle to rebuild and without which "
+        f"an emissions test fails."
+    )
 
 
 @dataclass(frozen=True)
@@ -135,21 +160,28 @@ class WhitelistEntry:
 
 class WriteGate:
     """
-    The three checks every write passes, or does not.
+    The checks every write passes, or does not.
 
     Args:
         whitelist: What the active vehicle profile permits. A `ResolvedProfile`, a list
             of raw entries, or nothing at all — which permits nothing.
         enabled: Override the kill switch, for tests. Leave None to read the environment.
+        agent: Whether this gate serves a request arriving through MCP, which adds the
+            fourth check.
+        agent_enabled: Override the agent switch, for tests.
     """
 
     def __init__(
         self,
         whitelist: Any = None,
         enabled: Optional[bool] = None,
+        agent: bool = False,
+        agent_enabled: Optional[bool] = None,
     ):
         self._entries: Tuple[WhitelistEntry, ...] = tuple(_coerce_whitelist(whitelist))
         self._enabled = enabled
+        self.agent = agent
+        self._agent_enabled = agent_enabled
 
     @property
     def entries(self) -> Tuple[WhitelistEntry, ...]:
@@ -160,6 +192,20 @@ class WriteGate:
     def enabled(self) -> bool:
         """Whether the process-level kill switch is open."""
         return writes_enabled() if self._enabled is None else self._enabled
+
+    @property
+    def agent_enabled(self) -> bool:
+        """Whether writes requested through MCP are additionally allowed."""
+        return agent_writes_enabled() if self._agent_enabled is None else self._agent_enabled
+
+    def for_agent(self) -> "WriteGate":
+        """The same permissions, but judged as a request arriving through MCP."""
+        return WriteGate(
+            whitelist=list(self._entries),
+            enabled=self._enabled,
+            agent=True,
+            agent_enabled=self._agent_enabled,
+        )
 
     def allows(self, service: int, identifier: Optional[int] = None) -> bool:
         """Whether a call would pass every gate bar the per-call confirmation."""
@@ -195,6 +241,13 @@ class WriteGate:
                 f"Set {WRITE_ENABLED_ENV}=1 to enable it for this process."
             )
 
+        if self.agent and not self.agent_enabled:
+            raise DiagnosticWriteRefused(
+                f"{name} is refused to an agent: writing is enabled for this process but not for "
+                f"requests arriving through MCP. Set {AGENT_WRITE_ENABLED_ENV}=1 as well to allow "
+                f"an AI agent to write to the vehicle. The two are separate on purpose."
+            )
+
         if service in WRITE_SERVICES and not any(entry.covers(service, identifier) for entry in self._entries):
             target = f" 0x{identifier:04X}" if identifier is not None else ""
             raise DiagnosticWriteRefused(
@@ -210,17 +263,23 @@ class WriteGate:
 
     def describe(self) -> Dict[str, Any]:
         """A JSON-friendly summary of the current posture, for the GUI and for logs."""
-        return {
+        posture: Dict[str, Any] = {
             "enabled": self.enabled,
             "environment_variable": WRITE_ENABLED_ENV,
+            "agent_writes_enabled": self.agent_enabled,
+            "agent_environment_variable": AGENT_WRITE_ENABLED_ENV,
             "implemented_services": [service_name(service) for service in sorted(IMPLEMENTED_SERVICES)],
             "refused_services": [name for service, name in sorted(WRITE_SERVICES.items())],
             "whitelist": [str(entry) for entry in self._entries],
         }
+        if self.enabled and self.agent_enabled:
+            posture["warning"] = agent_write_warning()
+        return posture
 
     def __str__(self) -> str:
         state = "enabled" if self.enabled else "disabled"
-        return f"diagnostic writes {state}, {len(self._entries)} whitelisted entry(ies)"
+        suffix = ", agents allowed" if self.enabled and self.agent_enabled else ""
+        return f"diagnostic writes {state}{suffix}, {len(self._entries)} whitelisted entry(ies)"
 
 
 def _coerce_whitelist(whitelist: Any) -> List[WhitelistEntry]:

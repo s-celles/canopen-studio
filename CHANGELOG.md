@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Declarative vehicle profiles with inheritance (generic J1979 → make → model and year) and a four-stage resolution cascade: VIN, supported-PID fingerprint, manual choice, then generic J1979. Resolution never fails, because a wrong-but-specific profile would decode a manufacturer PID into a plausible-looking wrong number.
 - The generic `j1979_base` profile as shipped data, covering mode 01 (`0x00`–`0x60`) and mode 09, verified by tests against the standard's own worked values.
 - Importers for Torque Pro custom-PID CSV exports and for DBC databases (via the optional `cantools` extra, `canopen-studio[dbc]`). Both skip a definition they cannot express exactly, with a reason, rather than importing one that would decode to a plausible wrong number.
-- Nine read-only `obd_*` MCP tools on the **existing** server — one process, one port, one set of guards.
+- Ten `obd_*` MCP tools on the **existing** server — one process, one port, one set of guards. Nine read; `obd_clear_dtcs` can change the vehicle and is gated (see below).
 - An **🩺 OBD-II Diagnostics** GUI tab: adapter selection, vehicle identification, supported-parameter discovery and live reading, trouble codes, and a gated clear.
 - Opt-in integration tests against Ircama's ELM327-emulator (`just test-emulator`), plus an in-repository ELM327 fake that carries the everyday suite with nothing installed.
 - `just` recipes: `test-emulator`, `emulator`, `import-torque`, `profiles`.
@@ -27,7 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diagnostic writes are off by default and pass three independent gates: the `CANOPEN_STUDIO_DIAG_WRITE` environment flag (following the `CANOPEN_STUDIO_A2A` pattern), a per-profile `write_whitelist`, and an explicit per-call confirmation that never persists. A refused write transmits nothing.
 - The UDS write services `0x2E`, `0x31` and `0x2F` have **no request path** in this release and are refused even with every gate open. The gate exists so that adding one is a deliberate change rather than an accident.
 - Clearing trouble codes (mode 04) is implemented but gated, and the GUI states what it costs: it erases the readiness monitors, which need a full drive cycle to rebuild and without which an emissions test fails.
-- No write is exposed to MCP. An agent holding a tool schema is not the person who set an environment variable and confirmed a specific call.
+- A write requested through MCP passes a **fourth** gate, `CANOPEN_STUDIO_MCP_DIAG_WRITE`, on top of the three above. It is deliberately separate from `CANOPEN_STUDIO_DIAG_WRITE`: enabling writes so that a person can clear codes from the GUI must not, by itself, hand that capability to whatever model is connected to the server. With only one of the two set, the call transmits nothing and the refusal names the missing one.
+- When agent writes are enabled, the capability is stated at the server's console on startup, in the tool's own description, in the result of every trouble-code read, and in `obd_status()`. Nobody should discover it by watching a model use it.
+- The UDS write services stay unavailable through MCP, because they stay unimplemented everywhere.
 - Decoding formulas from profiles and imported files are **interpreted, never executed**: parsed to a syntax tree, whitelisted node by node, and evaluated by walking that tree. Nothing is compiled and `eval` is never called, so a profile cannot reach the filesystem, the network or the interpreter. Profile files are read with `yaml.safe_load`, and exponents are bounded.
 
 ### Changed

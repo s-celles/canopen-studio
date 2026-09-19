@@ -1,15 +1,18 @@
 """
 Unit tests for the diagnostic write gate.
 
-The three gates are independent and all must open, so each is tested on its own and the
+The gates are independent and all must open, so each is tested on its own and the
 combination is tested for the property that matters most: when a write is refused,
-nothing is transmitted.
+nothing is transmitted. The fourth gate applies only to a request arriving through MCP,
+and exists so that enabling writes for a person at the GUI does not hand the capability
+to a connected model.
 """
 
 import pytest
 
 from canopen_studio.diag import DiagnosticInterface, DiagnosticResponse
 from canopen_studio.diag.security import (
+    AGENT_WRITE_ENABLED_ENV,
     IMPLEMENTED_SERVICES,
     MODE_CLEAR_DTC,
     WRITE_ENABLED_ENV,
@@ -17,6 +20,8 @@ from canopen_studio.diag.security import (
     DiagnosticWriteRefused,
     WhitelistEntry,
     WriteGate,
+    agent_write_warning,
+    agent_writes_enabled,
     clear_trouble_codes,
     service_name,
     writes_enabled,
@@ -49,8 +54,9 @@ class RecordingInterface(DiagnosticInterface):
 
 @pytest.fixture(autouse=True)
 def writes_off(monkeypatch):
-    """Every test starts with the kill switch closed, as a fresh process does."""
+    """Every test starts with both switches closed, as a fresh process does."""
     monkeypatch.delenv(WRITE_ENABLED_ENV, raising=False)
+    monkeypatch.delenv(AGENT_WRITE_ENABLED_ENV, raising=False)
 
 
 class TestKillSwitch:
@@ -263,3 +269,97 @@ class TestPosture:
         assert service_name(0x2E) == "WriteDataByIdentifier"
         assert service_name(0x04) == "ClearDiagnosticInformation"
         assert "0x99" in service_name(0x99)
+
+
+class TestAgentGate:
+    """
+    The fourth gate. A write arriving through MCP needs its own switch, so that enabling
+    writes for a person at the GUI does not hand the capability to a connected model.
+    """
+
+    def test_agent_writes_are_off_in_a_fresh_process(self):
+        assert agent_writes_enabled() is False
+
+    def test_the_agent_environment_variable_opens_it(self, monkeypatch):
+        monkeypatch.setenv(AGENT_WRITE_ENABLED_ENV, "1")
+
+        assert agent_writes_enabled() is True
+
+    def test_a_non_agent_gate_ignores_the_agent_switch(self):
+        """A person at the GUI needs only the process switch."""
+        WriteGate(enabled=True, agent=False).check(MODE_CLEAR_DTC, confirm=True)
+
+    def test_an_agent_gate_needs_the_extra_switch(self):
+        gate = WriteGate(enabled=True, agent=True, agent_enabled=False)
+
+        with pytest.raises(DiagnosticWriteRefused) as excinfo:
+            gate.check(MODE_CLEAR_DTC, confirm=True)
+
+        assert AGENT_WRITE_ENABLED_ENV in str(excinfo.value)
+
+    def test_the_refusal_says_the_two_are_separate_on_purpose(self):
+        gate = WriteGate(enabled=True, agent=True, agent_enabled=False)
+
+        with pytest.raises(DiagnosticWriteRefused) as excinfo:
+            gate.check(MODE_CLEAR_DTC, confirm=True)
+
+        assert "separate on purpose" in str(excinfo.value)
+
+    def test_an_agent_gate_passes_with_both_switches_open(self):
+        WriteGate(enabled=True, agent=True, agent_enabled=True).check(MODE_CLEAR_DTC, confirm=True)
+
+    def test_the_process_switch_is_still_required_for_an_agent(self):
+        """The agent switch alone must not bypass the general one."""
+        gate = WriteGate(enabled=False, agent=True, agent_enabled=True)
+
+        with pytest.raises(DiagnosticWriteRefused) as excinfo:
+            gate.check(MODE_CLEAR_DTC, confirm=True)
+
+        assert WRITE_ENABLED_ENV in str(excinfo.value)
+
+    def test_confirmation_is_still_required_for_an_agent(self):
+        gate = WriteGate(enabled=True, agent=True, agent_enabled=True)
+
+        with pytest.raises(DiagnosticWriteRefused):
+            gate.check(MODE_CLEAR_DTC)
+
+    def test_a_gate_can_be_rederived_for_an_agent(self):
+        gate = WriteGate(whitelist=[{"service": "0x2E"}], enabled=True, agent_enabled=False)
+
+        agent_gate = gate.for_agent()
+
+        assert agent_gate.agent is True
+        assert agent_gate.entries == gate.entries
+
+    def test_an_agent_refusal_transmits_nothing(self):
+        interface = RecordingInterface()
+        gate = WriteGate(enabled=True, agent=True, agent_enabled=False)
+
+        with pytest.raises(DiagnosticWriteRefused):
+            clear_trouble_codes(interface, gate, confirm=True)
+
+        assert interface.requests == []
+
+    def test_an_agent_clear_is_sent_once_both_switches_are_open(self):
+        interface = RecordingInterface({b"\x04": [(0x7E8, bytes([0x44]))]})
+        gate = WriteGate(enabled=True, agent=True, agent_enabled=True)
+
+        assert clear_trouble_codes(interface, gate, confirm=True) == [0x7E8]
+
+    def test_the_posture_reports_the_agent_switch(self):
+        posture = WriteGate(enabled=True, agent_enabled=True).describe()
+
+        assert posture["agent_writes_enabled"] is True
+        assert posture["agent_environment_variable"] == AGENT_WRITE_ENABLED_ENV
+
+    def test_the_posture_warns_when_agents_may_write(self):
+        assert "readiness monitors" in WriteGate(enabled=True, agent_enabled=True).describe()["warning"]
+
+    def test_the_posture_carries_no_warning_otherwise(self):
+        assert "warning" not in WriteGate(enabled=True, agent_enabled=False).describe()
+
+    def test_a_gate_allowing_agents_says_so_when_rendered(self):
+        assert "agents allowed" in str(WriteGate(enabled=True, agent_enabled=True))
+
+    def test_the_warning_names_the_variable_that_enabled_it(self):
+        assert AGENT_WRITE_ENABLED_ENV in agent_write_warning()

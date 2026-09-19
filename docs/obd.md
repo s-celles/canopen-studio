@@ -379,6 +379,7 @@ some of those changes cannot be undone from a laptop.
 | Kill switch | `CANOPEN_STUDIO_DIAG_WRITE` must be set. Off by default, like `CANOPEN_STUDIO_A2A`. |
 | Per-profile whitelist | A manufacturer service is allowed only if the active profile names it in `write_whitelist` — a reviewed data file, not an argument passed once. |
 | Per-call confirmation | `confirm=True` for that one call. It cannot be defaulted on and never persists. |
+| Agent switch | `CANOPEN_STUDIO_MCP_DIAG_WRITE`, required *in addition* for a write arriving through MCP. |
 
 A refused write **transmits nothing**.
 
@@ -409,13 +410,43 @@ clear_trouble_codes(link, WriteGate(match.profile), confirm=True)
     vehicle needs a full drive cycle to rebuild those, and an emissions test taken before
     that will fail. Permanent codes are unaffected — only the vehicle can clear them.
 
-### Agents get read-only tools
+### Letting an agent write
 
-The MCP tools are read-only by construction. There is no tool that clears codes or writes
-to an ECU: the write gate exists for a person who has set an environment variable and
-confirmed a specific call, and an agent holding a tool schema is not that person. A model
-deciding to "reset the fault and try again" would erase readiness monitors on somebody's
-car.
+`obd_clear_dtcs` is the one MCP tool that changes the vehicle. It is registered always —
+so that a refusal is a message an agent can reason about rather than a missing tool — and
+shut unless **both** switches are set:
+
+```bash
+CANOPEN_STUDIO_DIAG_WRITE=1 CANOPEN_STUDIO_MCP_DIAG_WRITE=1 uv run canopen-mcp
+```
+
+The two are separate on purpose. Enabling writes so that a person can clear codes from the
+GUI must not, by itself, hand that capability to whatever model is connected to the server.
+With only one set, the call transmits nothing and the refusal names the missing one.
+
+Once enabled, the capability is stated everywhere it could matter:
+
+- on the server's console at startup, so nobody discovers it by watching a model use it;
+- in the tool's own description, which is what a model reads before deciding to call it;
+- in the result of every trouble-code read;
+- in `obd_status()`, under `writes.warning`.
+
+```
+WARNING: CANOPEN_STUDIO_MCP_DIAG_WRITE is set — an AI agent connected to this server can
+clear diagnostic trouble codes on the connected vehicle. Clearing also erases the
+readiness monitors, which need a full drive cycle to rebuild and without which an
+emissions test fails.
+```
+
+!!! danger "What this actually permits"
+    A model that decides to "reset the fault and try again" will erase the readiness
+    monitors on somebody's car. On a vehicle due for an emissions inspection, that costs
+    its owner the appointment. The tool's description tells the model to ask first, and
+    `confirm=True` is still required on every call — but neither is a substitute for
+    deciding whether you want this on at all.
+
+    The UDS write services remain unavailable through MCP, because they remain
+    unimplemented everywhere.
 
 ---
 
@@ -435,6 +466,7 @@ guards.
 | `obd_read_vin()` | The VIN, decoded |
 | `obd_identify_vehicle()` | Everything the vehicle says about itself |
 | `obd_list_profiles()` | Profiles available for a manual choice |
+| `obd_clear_dtcs(confirm)` | **Destructive.** Clears codes and readiness monitors; needs both write switches |
 
 ---
 

@@ -6,11 +6,17 @@ process, one port, one set of guards. `register(mcp)` is called from there, and 
 are plain module-level functions so they can be tested without a server at all — the same
 arrangement the CAN tools already use.
 
-**Every tool here reads.** There is deliberately no tool that clears trouble codes or
-writes to an ECU. The write gate in `canopen_studio.diag.security` exists for a person at
-a keyboard who has set an environment variable and confirmed a specific call; an agent
-holding a tool schema is not that person. A model that decides to "reset the fault and
-try again" would erase readiness monitors on somebody's car.
+**Every tool here reads, except one, and that one is off unless it is deliberately
+turned on.** `obd_clear_dtcs` can clear diagnostic trouble codes, but only when
+`CANOPEN_STUDIO_MCP_DIAG_WRITE` is set *in addition to* `CANOPEN_STUDIO_DIAG_WRITE`. The
+two are separate on purpose: enabling writes so that a person can clear codes from the
+GUI must not, by itself, hand that capability to whatever model is connected to the
+server.
+
+When it is enabled, the capability is stated everywhere it could matter — in the tool's
+own description, in the result of every trouble-code read, in `obd_status()`, and on the
+server's console at startup — because a model deciding to "reset the fault and try again"
+would erase readiness monitors on somebody's car.
 
 Author: Sébastien Celles
 License: GNU General Public License v3.0 (GPL-3.0-or-later)
@@ -30,7 +36,7 @@ from .j1979.pids import parse_key
 from .native import NativeCanDiagnosticInterface, QueueFrameSource
 from .profiles.library import ProfileLibrary, default_library
 from .profiles.resolver import ProfileMatch, ProfileResolver
-from .security import WriteGate
+from .security import WriteGate, agent_write_warning, agent_writes_enabled, clear_trouble_codes
 
 # The session these tools act on. One at a time: a vehicle has one diagnostic link.
 _session: Optional[DiagnosticInterface] = None
@@ -67,6 +73,12 @@ def _require_session() -> J1979Client:
     if _client is None:
         raise DiagnosticError("no diagnostic session — call obd_connect() first")
     return _client
+
+
+def _gate(agent: bool = False) -> WriteGate:
+    """The write gate for the active profile, judged as an agent request when asked."""
+    profile = _match.profile if _match is not None else None
+    return WriteGate(profile, agent=agent)
 
 
 def _reset_state() -> None:
@@ -149,7 +161,7 @@ def obd_connect(
         "link": session.description,
         "vehicle": identity.as_dict(),
         "profile": match.as_dict(),
-        "writes": WriteGate(match.profile).describe(),
+        "writes": WriteGate(match.profile, agent=True).describe(),
     }
 
 
@@ -198,7 +210,7 @@ def obd_status() -> Dict[str, Any]:
         "connected": True,
         "link": _session.description,
         "profile": _match.as_dict(),
-        "writes": WriteGate(_match.profile).describe(),
+        "writes": _gate(agent=True).describe(),
     }
 
 
@@ -290,11 +302,61 @@ def obd_read_dtcs(kind: str = "stored") -> Dict[str, Any]:
     else:
         return {"error": f"unknown kind {kind!r}; expected all, {', '.join(DTC_MODES)}"}
 
-    return {
+    result = {
         "kind": wanted,
         "count": len(codes),
         "codes": [code.as_dict() for code in codes],
-        "note": "Clearing codes is not available to agents; it erases the readiness monitors.",
+    }
+    if agent_writes_enabled():
+        result["clearing"] = agent_write_warning()
+    else:
+        result["clearing"] = (
+            "Clearing codes is not available: it needs both CANOPEN_STUDIO_DIAG_WRITE=1 and "
+            "CANOPEN_STUDIO_MCP_DIAG_WRITE=1. Clearing erases the readiness monitors."
+        )
+    return result
+
+
+def obd_clear_dtcs(confirm: bool = False) -> Dict[str, Any]:
+    """DESTRUCTIVE. Clear stored diagnostic trouble codes on the connected vehicle.
+
+    Do not call this to "try again" after a fault, to tidy up a reading, or on your own
+    initiative. Ask the person first, every time.
+
+    Alongside the trouble codes, mode 04 erases the freeze frame and the **readiness
+    monitors**. The vehicle needs a full drive cycle — typically tens of kilometres of
+    mixed driving — to rebuild those, and an emissions inspection taken before they are
+    complete will fail. On a car due for a test, clearing codes can cost its owner the
+    appointment. Permanent codes are not affected; only the vehicle can clear those.
+
+    This tool is disabled unless the operator has set BOTH CANOPEN_STUDIO_DIAG_WRITE=1
+    and CANOPEN_STUDIO_MCP_DIAG_WRITE=1 for the server process. When either is missing
+    the call transmits nothing and explains which one is absent.
+
+    Args:
+        confirm: Must be True. Nothing is transmitted otherwise. This is a separate,
+            explicit acknowledgement that the consequences above are intended.
+    """
+    client = _require_session()
+    if _session is None:
+        return {"cleared": False, "error": "no diagnostic session"}
+
+    gate = _gate(agent=True)
+    try:
+        acknowledged = clear_trouble_codes(_session, gate, confirm=confirm)
+    except DiagnosticError as exc:
+        return {"cleared": False, "refused": True, "reason": str(exc)}
+
+    # Read back, so the answer reflects the vehicle rather than the request.
+    remaining = client.read_all_dtcs()
+    return {
+        "cleared": True,
+        "acknowledged_by": [f"0x{ecu:X}" for ecu in acknowledged],
+        "remaining_codes": [code.code for code in remaining],
+        "consequence": (
+            "The readiness monitors were erased with the codes. The vehicle needs a full "
+            "drive cycle to rebuild them; an emissions test before then will fail."
+        ),
     }
 
 
@@ -338,9 +400,8 @@ def obd_list_profiles() -> Dict[str, Any]:
     }
 
 
-# Every tool this module contributes. Read-only by construction: adding a write here
-# would also need the gate in `security.py`, which refuses agents by design.
-TOOLS = (
+# Every tool this module contributes.
+READ_TOOLS = (
     obd_connect,
     obd_disconnect,
     obd_status,
@@ -351,6 +412,13 @@ TOOLS = (
     obd_identify_vehicle,
     obd_list_profiles,
 )
+
+# Tools that can change the vehicle. Registered unconditionally so that the refusal is a
+# clear message rather than a missing tool an agent cannot reason about, and gated at
+# call time by `security.WriteGate`.
+WRITE_TOOLS = (obd_clear_dtcs,)
+
+TOOLS = READ_TOOLS + WRITE_TOOLS
 
 
 def register(mcp: Any) -> List[str]:
@@ -366,3 +434,15 @@ def register(mcp: Any) -> List[str]:
     for tool in TOOLS:
         mcp.tool()(tool)
     return [tool.__name__ for tool in TOOLS]
+
+
+def startup_notice() -> Optional[str]:
+    """
+    The line the server prints when an agent is able to write, or None when it cannot.
+
+    Printed at startup rather than only on the first call, so that nobody discovers the
+    capability by watching a model use it.
+    """
+    if agent_writes_enabled():
+        return agent_write_warning()
+    return None

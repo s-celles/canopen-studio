@@ -2,8 +2,9 @@
 Unit tests for the OBD-II MCP tools.
 
 The tools are plain functions, so they are called directly here, the same way
-`tests/test_mcp_server.py` exercises the CAN tools. The class that matters most is the
-last one: no tool may write to a vehicle.
+`tests/test_mcp_server.py` exercises the CAN tools. The classes that matter most are the
+last two: exactly one tool can change a vehicle, and it stays shut unless the operator
+opened both switches.
 """
 
 import pytest
@@ -11,6 +12,7 @@ from elm327_fake import FakeElm327
 
 import canopen_studio.diag.mcp_tools as tools
 import canopen_studio.mcp_server as mcp_server
+from canopen_studio.diag.security import AGENT_WRITE_ENABLED_ENV, WRITE_ENABLED_ENV
 from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
 from canopen_studio.diag.j1979.client import J1979Client
 from canopen_studio.diag.profiles.library import ProfileLibrary
@@ -33,13 +35,22 @@ ECUS = {
 
 
 @pytest.fixture(autouse=True)
-def clean_state():
-    """Every test starts with no session, and leaves none behind."""
+def clean_state(monkeypatch):
+    """Every test starts with no session and both write switches closed."""
+    monkeypatch.delenv(WRITE_ENABLED_ENV, raising=False)
+    monkeypatch.delenv(AGENT_WRITE_ENABLED_ENV, raising=False)
     tools._reset_state()
     tools.set_app(None)
     yield
     tools._reset_state()
     tools.set_app(None)
+
+
+@pytest.fixture
+def writes_allowed(monkeypatch):
+    """Both switches open, as an operator who deliberately enabled agent writes."""
+    monkeypatch.setenv(WRITE_ENABLED_ENV, "1")
+    monkeypatch.setenv(AGENT_WRITE_ENABLED_ENV, "1")
 
 
 @pytest.fixture
@@ -74,6 +85,10 @@ class TestRegistration:
         for name in mcp_server.DIAGNOSTIC_TOOLS:
             assert name.islower()
             assert name.startswith("obd_")
+
+    def test_the_write_tool_is_registered_like_the_others(self):
+        """Registered unconditionally, so a refusal is a message an agent can reason about."""
+        assert "obd_clear_dtcs" in mcp_server.DIAGNOSTIC_TOOLS
 
     def test_every_tool_documents_itself(self):
         """The docstring is the schema an agent reads."""
@@ -152,7 +167,17 @@ class TestStatus:
         writes = tools.obd_status()["writes"]
 
         assert writes["enabled"] is False
+        assert writes["agent_writes_enabled"] is False
         assert "WriteDataByIdentifier" in writes["refused_services"]
+
+    def test_the_status_carries_a_warning_once_agents_may_write(self, session, writes_allowed):
+        writes = tools.obd_status()["writes"]
+
+        assert writes["agent_writes_enabled"] is True
+        assert "readiness monitors" in writes["warning"]
+
+    def test_the_status_carries_no_warning_while_writes_are_off(self, session):
+        assert "warning" not in tools.obd_status()["writes"]
 
 
 class TestReadingPids:
@@ -225,7 +250,13 @@ class TestReadingTroubleCodes:
 
     def test_the_result_says_clearing_is_not_available(self, session):
         """An agent asking to clear should learn why it cannot, from the read itself."""
-        assert "readiness monitors" in tools.obd_read_dtcs()["note"]
+        clearing = tools.obd_read_dtcs()["clearing"]
+
+        assert "not available" in clearing
+        assert AGENT_WRITE_ENABLED_ENV in clearing
+
+    def test_the_result_warns_when_clearing_is_available(self, session, writes_allowed):
+        assert "WARNING" in tools.obd_read_dtcs()["clearing"]
 
 
 class TestVehicleIdentity:
@@ -264,23 +295,118 @@ class TestVehicleIdentity:
         assert result["profile"]["profile"]["generic"] is True
 
 
-class TestNoWritesAreExposed:
-    """An agent reads. Everything that changes a vehicle stays behind the write gate."""
+def _flatten(text: str) -> str:
+    """Collapse whitespace, so an assertion is not hostage to where a line wraps."""
+    return " ".join(str(text).split())
 
-    FORBIDDEN = ("clear", "write", "erase", "reset", "routine", "control")
 
-    def test_no_tool_name_suggests_a_write(self):
-        for tool in tools.TOOLS:
+class TestOnlyOneToolWrites:
+    """Everything else reads, and the one that does not is identified as such."""
+
+    FORBIDDEN = ("write", "erase", "reset", "routine", "control")
+
+    def test_exactly_one_tool_can_change_the_vehicle(self):
+        assert tools.WRITE_TOOLS == (tools.obd_clear_dtcs,)
+
+    def test_no_read_tool_name_suggests_a_write(self):
+        for tool in tools.READ_TOOLS:
             assert not any(word in tool.__name__ for word in self.FORBIDDEN), tool.__name__
 
-    def test_no_tool_calls_the_clear_service(self):
-        """Mode 04 erases the readiness monitors; it is not an agent's to call."""
-        for tool in tools.TOOLS:
-            source = tool.__code__.co_consts
-            assert "clear_trouble_codes" not in [c for c in source if isinstance(c, str)]
+    def test_no_read_tool_reaches_the_clear_service(self):
+        for tool in tools.READ_TOOLS:
+            constants = [c for c in tool.__code__.co_consts if isinstance(c, str)]
+            assert "clear_trouble_codes" not in constants, tool.__name__
 
-    def test_the_write_gate_is_not_reachable_through_a_tool(self, session):
-        assert tools.obd_status()["writes"]["enabled"] is False
+    def test_the_write_tool_describes_its_consequence(self):
+        """The docstring is the only thing a model reads before deciding to call it."""
+        doc = _flatten(tools.obd_clear_dtcs.__doc__)
 
-    def test_the_module_exposes_no_clearing_helper(self):
-        assert not hasattr(tools, "obd_clear_dtcs")
+        assert "DESTRUCTIVE" in doc
+        assert "readiness monitors" in doc
+        assert "Ask the person first" in doc
+
+    def test_the_write_tool_tells_the_model_not_to_act_alone(self):
+        assert "on your own initiative" in _flatten(tools.obd_clear_dtcs.__doc__)
+
+    def test_the_server_instructions_warn_about_it(self):
+        instructions = _flatten(mcp_server.mcp.instructions)
+
+        assert "obd_clear_dtcs" in instructions
+        assert "Ask the person first" in instructions
+
+
+class TestClearingIsGated:
+    """The whole point of the specific configuration: it is shut unless both are open."""
+
+    def test_nothing_is_sent_with_both_switches_closed(self, session):
+        result = tools.obd_clear_dtcs(confirm=True)
+
+        assert result["cleared"] is False
+        assert result["refused"] is True
+
+    def test_the_refusal_names_the_process_switch_first(self, session):
+        assert WRITE_ENABLED_ENV in tools.obd_clear_dtcs(confirm=True)["reason"]
+
+    def test_the_process_switch_alone_is_not_enough(self, session, monkeypatch):
+        """Enabling writes for the GUI must not hand the capability to an agent."""
+        monkeypatch.setenv(WRITE_ENABLED_ENV, "1")
+
+        result = tools.obd_clear_dtcs(confirm=True)
+
+        assert result["refused"] is True
+        assert AGENT_WRITE_ENABLED_ENV in result["reason"]
+
+    def test_the_agent_switch_alone_is_not_enough(self, session, monkeypatch):
+        monkeypatch.setenv(AGENT_WRITE_ENABLED_ENV, "1")
+
+        result = tools.obd_clear_dtcs(confirm=True)
+
+        assert result["refused"] is True
+        assert WRITE_ENABLED_ENV in result["reason"]
+
+    def test_confirmation_is_still_required_with_both_switches_open(self, session, writes_allowed):
+        result = tools.obd_clear_dtcs()
+
+        assert result["refused"] is True
+        assert "confirm=True" in result["reason"]
+
+    def test_a_refusal_transmits_nothing(self, session, monkeypatch):
+        """The property that matters: a refused clear never reaches the vehicle."""
+        sent = []
+        monkeypatch.setattr(session, "_request", lambda payload, timeout: sent.append(payload) or [])
+
+        tools.obd_clear_dtcs(confirm=True)
+
+        assert sent == []
+
+    def test_a_confirmed_clear_is_sent_when_both_switches_are_open(self, session, writes_allowed):
+        result = tools.obd_clear_dtcs(confirm=True)
+
+        assert result["cleared"] is True
+
+    def test_the_result_states_the_consequence(self, session, writes_allowed):
+        assert "readiness monitors" in tools.obd_clear_dtcs(confirm=True)["consequence"]
+
+    def test_the_result_reads_the_codes_back_from_the_vehicle(self, session, writes_allowed):
+        """Reporting the vehicle's state rather than the request's success."""
+        assert "remaining_codes" in tools.obd_clear_dtcs(confirm=True)
+
+    def test_clearing_without_a_session_is_refused(self):
+        with pytest.raises(Exception) as excinfo:
+            tools.obd_clear_dtcs(confirm=True)
+
+        assert "obd_connect" in str(excinfo.value)
+
+
+class TestStartupNotice:
+    def test_nothing_is_announced_while_agent_writes_are_off(self):
+        assert tools.startup_notice() is None
+
+    def test_the_capability_is_announced_at_startup(self, writes_allowed):
+        """Nobody should discover it by watching a model use it."""
+        notice = tools.startup_notice()
+
+        assert notice and AGENT_WRITE_ENABLED_ENV in notice
+
+    def test_the_server_surfaces_the_same_notice(self, writes_allowed):
+        assert mcp_server.diagnostic_write_notice() == tools.startup_notice()
