@@ -184,3 +184,20 @@ def test_auto_echo_ignores_own_ping():
     # Ping should still be pending
     assert seq in tracker._pending_pings
 
+
+def test_udp_bus_unicast_broadcast():
+    """Verify open_can_bus creates UdpBus for unicast/broadcast addresses."""
+    from canopen_studio.interfaces import UdpBus
+    bus = open_can_bus("udp_multicast", "127.0.0.1:19999", 0)
+    try:
+        assert isinstance(bus, UdpBus)
+        assert bus.dest_ip == "127.0.0.1"
+        assert bus.port == 19999
+        bus.send(can.Message(arbitration_id=0x123, data=[4, 5, 6]))
+        rx = bus.recv(timeout=0.1)
+        assert rx is not None
+        assert rx.arbitration_id == 0x123
+        assert list(rx.data) == [4, 5, 6]
+    finally:
+        bus.shutdown()
+

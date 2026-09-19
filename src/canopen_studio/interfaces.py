@@ -165,6 +165,75 @@ def _detect_local_ip(target_ip: str = "8.8.8.8") -> Optional[str]:
     return None
 
 
+def is_multicast_ip(ip_str: str) -> bool:
+    """Return True if ip_str is an IPv4 or IPv6 multicast address."""
+    try:
+        if ":" in ip_str:
+            return ip_str.lower().startswith("ff")
+        first = int(ip_str.split(".")[0])
+        return 224 <= first <= 239
+    except Exception:
+        return False
+
+
+class UdpBus(can.BusABC):
+    """
+    Standard UDP unicast/broadcast CAN bus backend.
+
+    Uses python-can's msgpack wire format for CAN frames, but transmits over
+    standard UDP unicast or broadcast rather than IP multicast. This allows
+    reliable cross-machine communication on macOS (bypassing the Cocoa GUI multicast
+    entitlement restriction) and networks where multicast routing is disabled.
+    """
+
+    def __init__(
+        self,
+        channel: str = "127.0.0.1",
+        port: int = 1750,
+        receive_own_messages: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(channel=channel, **kwargs)
+        self.dest_ip = channel
+        self.port = port
+        self.receive_own_messages = receive_own_messages
+
+        from can.interfaces.udp_multicast.utils import pack_message, unpack_message
+        self._pack_message = pack_message
+        self._unpack_message = unpack_message
+
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if hasattr(socket, "SO_REUSEPORT"):
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        self._sock.bind(("", self.port))
+        self._send_dest = (self.dest_ip, self.port)
+
+    def send(self, msg: can.Message, timeout: Optional[float] = None) -> None:
+        data = self._pack_message(msg)
+        self._sock.sendto(data, self._send_dest)
+
+    def _recv_internal(self, timeout: Optional[float]) -> tuple[Optional[can.Message], bool]:
+        self._sock.settimeout(timeout)
+        try:
+            raw, addr = self._sock.recvfrom(4096)
+            now = time.time()
+            msg = self._unpack_message(raw, replace={"timestamp": now})
+            return msg, False
+        except (socket.timeout, TimeoutError):
+            return None, False
+        except OSError:
+            return None, False
+
+    def shutdown(self) -> None:
+        super().shutdown()
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+
+
 def open_can_bus(
     interface_key: str,
     channel: str,
@@ -205,17 +274,28 @@ def open_can_bus(
 
     if backend == "udp_multicast":
         kwargs["hop_limit"] = resolve_udp_hop_limit(hop_limit)
-        # Support "IP:PORT" syntax (e.g. 224.0.0.1:1750) or CANOPEN_UDP_PORT env var
+        target_ip = "224.0.0.1"
+        port = 43113
+        if "CANOPEN_UDP_PORT" in os.environ:
+            try:
+                port = int(os.environ["CANOPEN_UDP_PORT"])
+            except ValueError:
+                pass
+
         if isinstance(chan, str) and ":" in chan:
             ip_part, port_part = chan.rsplit(":", 1)
             if port_part.isdigit():
-                kwargs["channel"] = ip_part.strip()
-                kwargs["port"] = int(port_part.strip())
-        elif "CANOPEN_UDP_PORT" in os.environ:
-            try:
-                kwargs["port"] = int(os.environ["CANOPEN_UDP_PORT"])
-            except ValueError:
-                pass
+                target_ip = ip_part.strip()
+                port = int(port_part.strip())
+        elif isinstance(chan, str) and chan:
+            target_ip = chan.strip()
+
+        # If target is unicast or broadcast (not in multicast 224.0.0.0/4), use UdpBus
+        if not is_multicast_ip(target_ip):
+            return UdpBus(channel=target_ip, port=port)
+
+        kwargs["channel"] = target_ip
+        kwargs["port"] = port
 
     bus = can.Bus(**kwargs)
 
@@ -226,21 +306,17 @@ def open_can_bus(
             if sock and getattr(mcast, "ip_version", 4) == 4:
                 group = getattr(mcast, "group", "224.0.0.1")
                 local_ip = os.environ.get("CANOPEN_UDP_IF") or _detect_local_ip(group)
-                print(f"[open_can_bus] local_ip detected: {local_ip} for group {group}", flush=True)
                 if local_ip and local_ip != "0.0.0.0" and not local_ip.startswith("127."):
                     ip_bin = socket.inet_aton(local_ip)
                     # Bind outgoing multicast packets to this network interface (prevents Errno 65 on macOS)
                     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, ip_bin)
-                    print(f"[open_can_bus] IP_MULTICAST_IF set to {local_ip}", flush=True)
                     try:
                         group_bin = socket.inet_pton(socket.AF_INET, group)
                         sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group_bin + ip_bin)
                     except OSError:
                         pass
         except Exception as exc:
-            import traceback
-            print(f"[open_can_bus] Error configuring multicast socket: {exc}", flush=True)
-            traceback.print_exc()
+            pass
 
     return bus
 
