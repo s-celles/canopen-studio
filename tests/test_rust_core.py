@@ -157,3 +157,42 @@ class TestRustSdo:
         assert parsed["code"] == 0x06090011
         assert "Sub-index does not exist" in parsed["description"]
 
+
+@pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
+class TestRustIsoTp:
+    def test_single_frame_fragment_and_reassembly(self):
+        req = b"\x02\x01\x0C"  # Mode 01 PID 0C
+        frames = canopen_core.fragment_isotp(0x7DF, req)
+        assert len(frames) == 1
+        assert frames[0].id == 0x7DF
+        assert frames[0].data[0] == 3  # SF len = 3
+
+        reasm = canopen_core.IsoTpReassembler(0x7DF, 0x7E8)
+        data, fc = reasm.process_frame(frames[0])
+        assert fc is None
+        assert data == req
+
+    def test_multi_frame_vin_reassembly(self):
+        vin_resp = b"\x49\x02\x011FA6P8CF4H5100000"  # 20 bytes
+        frames = canopen_core.fragment_isotp(0x7E8, vin_resp)
+        assert len(frames) == 3
+
+        reasm = canopen_core.IsoTpReassembler(0x7E8, 0x7E0)
+        # Frame 0: First Frame
+        data1, fc1 = reasm.process_frame(frames[0])
+        assert data1 is None
+        assert fc1 is not None
+        assert fc1.id == 0x7E0
+        assert fc1.data[0] == 0x30  # Flow Control CTS
+
+        # Frame 1: Consecutive Frame 1
+        data2, fc2 = reasm.process_frame(frames[1])
+        assert data2 is None
+        assert fc2 is None
+
+        # Frame 2: Consecutive Frame 2
+        data3, fc3 = reasm.process_frame(frames[2])
+        assert fc3 is None
+        assert data3 == vin_resp
+
+

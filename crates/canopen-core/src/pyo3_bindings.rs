@@ -440,6 +440,57 @@ pub fn decode_sdo<'py>(
     }
 }
 
+#[cfg(feature = "python")]
+#[pyclass(name = "IsoTpReassembler")]
+pub struct PyIsoTpReassembler {
+    inner: crate::isotp::IsoTpReassembler,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyIsoTpReassembler {
+    #[new]
+    pub fn new(expected_rx_id: u32, tx_fc_id: u32) -> Self {
+        Self {
+            inner: crate::isotp::IsoTpReassembler::new(expected_rx_id, tx_fc_id),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+
+    pub fn is_transfer_in_progress(&self) -> bool {
+        self.inner.is_transfer_in_progress()
+    }
+
+    pub fn process_frame<'py>(
+        &mut self,
+        py: Python<'py>,
+        frame: &PyCanFrame,
+    ) -> PyResult<(Option<Bound<'py, PyBytes>>, Option<PyCanFrame>)> {
+        let (data_opt, fc_opt) = self
+            .inner
+            .process_frame(&frame.inner)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+
+        let py_data = data_opt.map(|d| PyBytes::new(py, &d));
+        let py_fc = fc_opt.map(|f| PyCanFrame { inner: f });
+        Ok((py_data, py_fc))
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyfunction]
+pub fn fragment_isotp(tx_id: u32, data: &[u8]) -> PyResult<Vec<PyCanFrame>> {
+    let frames = crate::isotp::fragment_isotp_message(tx_id, data)
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(frames
+        .into_iter()
+        .map(|f| PyCanFrame { inner: f })
+        .collect())
+}
+
 /// PyO3 C-Python module definition.
 #[cfg(feature = "python")]
 #[pymodule]
@@ -448,12 +499,14 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLatencyTracker>()?;
     m.add_class::<PyTraceRingBuffer>()?;
     m.add_class::<PyUdpCanBus>()?;
+    m.add_class::<PyIsoTpReassembler>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_write, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_abort, m)?)?;
     m.add_function(wrap_pyfunction!(decode_sdo, m)?)?;
+    m.add_function(wrap_pyfunction!(fragment_isotp, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
