@@ -928,6 +928,97 @@ impl PyEdsFile {
 
 /// PyO3 C-Python module definition.
 #[cfg(feature = "python")]
+#[cfg(feature = "python")]
+struct PyCallableBus {
+    send_callback: PyObject,
+    recv_callback: PyObject,
+}
+
+#[cfg(feature = "python")]
+impl crate::simulator::CanBusWrapper for PyCallableBus {
+    fn send(&self, frame: &crate::frame::CanFrame) -> bool {
+        Python::with_gil(|py| {
+            let py_frame = PyCanFrame {
+                inner: frame.clone(),
+            };
+            if let Err(e) = self.send_callback.call1(py, (py_frame,)) {
+                eprintln!("VirtualSimulator send callback error: {:?}", e);
+                false
+            } else {
+                true
+            }
+        })
+    }
+
+    fn recv(&self, timeout_ms: u64) -> Option<crate::frame::CanFrame> {
+        Python::with_gil(|py| {
+            match self.recv_callback.call1(py, (timeout_ms as f64 / 1000.0,)) {
+                Ok(obj) => {
+                    if obj.is_none(py) {
+                        None
+                    } else if let Ok(py_frame) = obj.extract::<PyRef<PyCanFrame>>(py) {
+                        Some(py_frame.inner.clone())
+                    } else {
+                        None
+                    }
+                }
+                Err(_e) => {
+                    // Usually timeouts cause errors
+                    None
+                }
+            }
+        })
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyclass(name = "VirtualCanopenSimulator")]
+pub struct PyVirtualCanopenSimulator {
+    state: std::sync::Arc<std::sync::RwLock<crate::simulator::SimulatorState>>,
+    thread_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyVirtualCanopenSimulator {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            state: std::sync::Arc::new(std::sync::RwLock::new(
+                crate::simulator::SimulatorState::new(),
+            )),
+            thread_handle: None,
+        }
+    }
+
+    pub fn start(&mut self, send_func: PyObject, recv_func: PyObject) -> PyResult<()> {
+        let state = self.state.write().unwrap();
+        if state.running.load(std::sync::atomic::Ordering::SeqCst) {
+            return Ok(()); // Already running
+        }
+        state
+            .running
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let state_clone = self.state.clone();
+
+        self.thread_handle = Some(std::thread::spawn(move || {
+            let bus = Box::new(PyCallableBus {
+                send_callback: send_func,
+                recv_callback: recv_func,
+            });
+            crate::simulator::run_simulator_loop(bus, state_clone);
+        }));
+        Ok(())
+    }
+
+    pub fn stop(&mut self) {
+        let state = self.state.write().unwrap();
+        state
+            .running
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 #[pymodule]
 pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCanFrame>()?;
@@ -938,6 +1029,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPdoMapping>()?;
     m.add_class::<PyNmtMaster>()?;
     m.add_class::<PyEdsFile>()?;
+    m.add_class::<PyVirtualCanopenSimulator>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_canopen_message, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;

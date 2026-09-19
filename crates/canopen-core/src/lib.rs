@@ -16,6 +16,7 @@ pub mod pdo;
 pub mod pyo3_bindings;
 pub mod ring_buffer;
 pub mod sdo;
+pub mod simulator;
 pub mod udp;
 
 pub use canopen::{decode_canopen_frame, CanopenMessageInfo, CanopenService, NmtState};

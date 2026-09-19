@@ -360,13 +360,7 @@ def open_can_bus(
 class VirtualCanopenSimulator:
     """
     Simulates real CANopen nodes on a virtual bus for learning and teaching without hardware.
-    Emits:
-    - Node 1 Heartbeat (0x701) and Node 2 Heartbeat (0x702)
-    - CANopen SYNC pulse (0x080) at 50 Hz
-    - CiA 402 TPDO1 (0x181) and TPDO2 (0x281) with dynamic motor speed
-    - SEVCON Gen4 TPDOs (0x148, 0x156, 0x270, 0x473) with simulated RPM, torque, and temps
-    - Answers SDO read requests (0x601 -> 0x581) for Device Type (0x1000) and Device Name (0x1008)
-    - Reacts to NMT master commands (0x000)
+    Now backed by Rust `canopen_core` for zero-overhead background timing and logic.
     """
 
     def __init__(self, channel_or_bus: Any = "virtual_bus"):
@@ -374,6 +368,8 @@ class VirtualCanopenSimulator:
         self.channel = "virtual_bus"
         self._owns_bus = False
         self.running = False
+        
+        self._native_sim = None
 
         if hasattr(channel_or_bus, "send") and hasattr(channel_or_bus, "recv"):
             self.sim_bus = channel_or_bus
@@ -389,12 +385,49 @@ class VirtualCanopenSimulator:
                 self._owns_bus = True
             except Exception:
                 return
+        
         self.running = True
-        self.thread = threading.Thread(target=self._sim_loop, daemon=True)
-        self.thread.start()
+        
+        try:
+            from . import canopen_core
+            self._native_sim = canopen_core.VirtualCanopenSimulator()
+            
+            # Create bridging callbacks
+            def py_send(frame):
+                msg = can.Message(
+                    timestamp=frame.timestamp_sec,
+                    arbitration_id=frame.id,
+                    is_extended_id=frame.is_extended,
+                    data=frame.data,
+                    is_remote_frame=frame.is_remote,
+                    is_error_frame=frame.is_error,
+                )
+                self.sim_bus.send(msg)
+                
+            def py_recv(timeout):
+                msg = self.sim_bus.recv(timeout)
+                if msg is not None:
+                    return canopen_core.CanFrame(
+                        msg.arbitration_id, 
+                        bytes(msg.data), 
+                        int(msg.timestamp * 1_000_000) if msg.timestamp else None,
+                        msg.is_extended_id
+                    )
+                return None
+                
+            self._native_sim.start(py_send, py_recv)
+            
+        except ImportError:
+            # Fallback for when core is not available
+            self.thread = threading.Thread(target=self._sim_loop, daemon=True)
+            self.thread.start()
 
     def stop(self):
         self.running = False
+        if self._native_sim is not None:
+            self._native_sim.stop()
+            self._native_sim = None
+            
         if self.sim_bus and self._owns_bus:
             try:
                 self.sim_bus.shutdown()
