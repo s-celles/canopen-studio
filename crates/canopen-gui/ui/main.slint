@@ -1,67 +1,171 @@
+import { Button, CheckBox, ComboBox, GroupBox, LineEdit } from "std-widgets.slint";
+
 export component MainWindow inherits Window {
-    width: 600px;
-    height: 400px;
-    title: "CANopen Studio - Real-Time Dashboard";
+    width: 1000px;
+    height: 700px;
+    title: "CAN & CANopen Studio";
 
     in-out property <int> rpm: 0;
     in-out property <string> nmt_state: "Pre-Operational";
+    in-out property <string> connection_status: "Connected";
+    in-out property <int> active_tab: 0; // 0: Dashboard, 1: Plotter, 2: Trace
 
     VerticalLayout {
-        padding: 40px;
-        spacing: 30px;
-
-        Text {
-            text: "CANopen Node 1 (SEVCON Gen4)";
-            font-size: 28px;
-            font-weight: 700;
-            horizontal-alignment: center;
-        }
-
+        // TOP BAR
         Rectangle {
-            background: #1e1e2e;
-            border-radius: 12px;
+            height: 60px;
+            background: #2a2a35;
             
-            VerticalLayout {
-                padding: 30px;
-                alignment: center;
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 15px;
+                alignment: start;
                 
                 Text {
-                    text: root.rpm + " RPM";
-                    font-size: 64px;
-                    font-weight: 800;
-                    color: #a6e3a1;
-                    horizontal-alignment: center;
+                    text: "Interface:";
+                    vertical-alignment: center;
+                    color: white;
+                }
+                ComboBox {
+                    model: ["UDP Multicast", "SocketCAN", "Virtual"];
+                    current-index: 0;
+                    width: 150px;
                 }
                 
                 Text {
-                    text: "Motor Speed (0x606C)";
-                    font-size: 16px;
-                    color: #a6adc8;
-                    horizontal-alignment: center;
+                    text: "Channel:";
+                    vertical-alignment: center;
+                    color: white;
+                }
+                LineEdit {
+                    text: "127.0.0.1:1750";
+                    width: 150px;
+                }
+
+                CheckBox {
+                    text: "Simulate";
+                    checked: true;
+                }
+
+                Button {
+                    text: "Connect";
+                    primary: true;
+                }
+                
+                Rectangle { horizontal-stretch: 1; }
+                
+                Text {
+                    text: "Status: " + root.connection_status;
+                    color: root.connection_status == "Connected" ? #a6e3a1 : #f38ba8;
+                    font-weight: 700;
+                    vertical-alignment: center;
                 }
             }
         }
-
-        Rectangle {
-            background: #1e1e2e;
-            border-radius: 12px;
-            height: 80px;
-
-            HorizontalLayout {
-                padding: 20px;
-                alignment: center;
-                spacing: 15px;
-
-                Text {
-                    text: "NMT State:";
-                    font-size: 20px;
-                    color: #cdd6f4;
+        
+        // MAIN BODY
+        HorizontalLayout {
+            // SIDEBAR TABS
+            Rectangle {
+                width: 200px;
+                background: #1e1e2e;
+                
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 5px;
+                    
+                    Rectangle {
+                        height: 40px;
+                        background: root.active_tab == 0 ? #313244 : transparent;
+                        border-radius: 6px;
+                        Text { text: "🌐 Dashboard"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 0 ? 700 : 400; }
+                        TouchArea { clicked => { root.active_tab = 0; } }
+                    }
+                    Rectangle {
+                        height: 40px;
+                        background: root.active_tab == 1 ? #313244 : transparent;
+                        border-radius: 6px;
+                        Text { text: "📈 Plotter"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 1 ? 700 : 400; }
+                        TouchArea { clicked => { root.active_tab = 1; } }
+                    }
+                    Rectangle {
+                        height: 40px;
+                        background: root.active_tab == 2 ? #313244 : transparent;
+                        border-radius: 6px;
+                        Text { text: "📋 Real-time Trace"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 2 ? 700 : 400; }
+                        TouchArea { clicked => { root.active_tab = 2; } }
+                    }
+                    Rectangle {
+                        height: 40px;
+                        background: root.active_tab == 3 ? #313244 : transparent;
+                        border-radius: 6px;
+                        Text { text: "🚀 Transmit"; color: white; vertical-alignment: center; x: 15px; font-weight: root.active_tab == 3 ? 700 : 400; }
+                        TouchArea { clicked => { root.active_tab = 3; } }
+                    }
+                    Rectangle { vertical-stretch: 1; }
                 }
-                Text {
-                    text: root.nmt_state;
-                    font-size: 20px;
-                    font-weight: 700;
-                    color: root.nmt_state == "Operational" ? #a6e3a1 : #f9e2af;
+            }
+            
+            // CONTENT AREA
+            Rectangle {
+                background: #181825;
+                
+                // DASHBOARD VIEW
+                if root.active_tab == 0 : VerticalLayout {
+                    padding: 40px;
+                    spacing: 30px;
+                    alignment: start;
+
+                    Text {
+                        text: "CANopen Node 1 (SEVCON Gen4)";
+                        font-size: 28px;
+                        font-weight: 700;
+                        color: white;
+                    }
+
+                    HorizontalLayout {
+                        spacing: 20px;
+                        
+                        Rectangle {
+                            background: #1e1e2e;
+                            border-radius: 12px;
+                            height: 150px;
+                            width: 250px;
+                            
+                            VerticalLayout {
+                                alignment: center;
+                                Text { text: root.rpm + " RPM"; font-size: 42px; font-weight: 800; color: #a6e3a1; horizontal-alignment: center; }
+                                Text { text: "Motor Speed"; font-size: 16px; color: #a6adc8; horizontal-alignment: center; }
+                            }
+                        }
+                        
+                        Rectangle {
+                            background: #1e1e2e;
+                            border-radius: 12px;
+                            height: 150px;
+                            width: 250px;
+                            
+                            VerticalLayout {
+                                alignment: center;
+                                Text { text: root.nmt_state; font-size: 32px; font-weight: 800; color: root.nmt_state == "Operational" ? #a6e3a1 : #f9e2af; horizontal-alignment: center; }
+                                Text { text: "NMT State"; font-size: 16px; color: #a6adc8; horizontal-alignment: center; }
+                            }
+                        }
+                    }
+                }
+                
+                // PLOTTER VIEW
+                if root.active_tab == 1 : VerticalLayout {
+                    padding: 40px;
+                    alignment: center;
+                    Text { text: "Plotter is under construction"; color: white; font-size: 24px; horizontal-alignment: center; }
+                }
+                
+                // TRACE VIEW
+                if root.active_tab == 2 : VerticalLayout {
+                    padding: 40px;
+                    alignment: center;
+                    Text { text: "Trace is under construction"; color: white; font-size: 24px; horizontal-alignment: center; }
                 }
             }
         }
