@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **CANopen Network Management (NMT) Master & Heartbeat Consumer Engine (CiA 301)**: Command generation (`StartRemoteNode`, `StopRemoteNode`, `EnterPreOperational`, `ResetNode`, `ResetCommunication`), real-time node state tracking, and heartbeat timeout detection (`NmtMaster`, `MonitoredNode`).
   - **Electronic Data Sheet (EDS) & Object Dictionary Engine (CiA 306)**: Parser for standard CANopen `.eds` files (`[FileInfo]`, `[DeviceInfo]`, objects `[1000]`, subindices `[1018sub1]`, data types, access rights, default values), with automatic `PdoMapping` generation directly from TPDO/RPDO mapping records (`0x1A00`..`0x1A03`, `0x1600`..`0x1603`).
   - **PyO3 Python Bindings (`canopen_core`)**: Exposes the compiled Rust core directly to Python (`from canopen_studio import canopen_core`), tested via `tests/test_rust_core.py` (including `IsoTpReassembler`, `fragment_isotp`, `PdoMapping`, `NmtMaster`, and `EdsFile`).
+  - **Phase 1A Native Integration**: The Python `UdpBus` interface now natively instantiates and delegates to the compiled Rust `canopen_core.UdpCanBus` and `canopen_core.CanFrame` objects, achieving wire-speed frame parsing directly in the backend and eliminating `python-can`'s MessagePack overhead.
 - **Rust CLI Tool (`crates/canopen-cli`)**:
   - `sniff`: Real-time decoded CANopen and OBD-II network monitoring over UDP.
   - `bench-tx`: High-speed packet generator achieving ~300,000 frames/second.
