@@ -215,12 +215,18 @@ export component MainWindow inherits Window {
                                 Path { commands: root.plot_path_b0; stroke: #00BFFF; stroke-width: 1.5px; }
                                 Path { commands: root.plot_path_b1; stroke: #32CD32; stroke-width: 1.5px; }
                                 
-                                Text { text: "250 -"; color: #888; y: 10px; x: 10px; }
-                                Text { text: "200 -"; color: #888; y: parent.height * 0.2; x: 10px; }
-                                Text { text: "150 -"; color: #888; y: parent.height * 0.4; x: 10px; }
-                                Text { text: "100 -"; color: #888; y: parent.height * 0.6; x: 10px; }
-                                Text { text: " 50 -"; color: #888; y: parent.height * 0.8; x: 10px; }
-                                Text { text: "  0 -"; color: #888; y: parent.height * 0.95; x: 10px; }
+                                // Y Axis (RPM)
+                                Text { text: "4000 -"; color: #888; y: 10px; x: 10px; }
+                                Text { text: "3000 -"; color: #888; y: parent.height * 0.25; x: 10px; }
+                                Text { text: "2000 -"; color: #888; y: parent.height * 0.5; x: 10px; }
+                                Text { text: "1000 -"; color: #888; y: parent.height * 0.75; x: 10px; }
+                                Text { text: "   0 -"; color: #888; y: parent.height - 30px; x: 10px; }
+                                
+                                // X Axis (Time)
+                                Text { text: "-30s"; color: #888; y: parent.height - 15px; x: 60px; }
+                                Text { text: "-20s"; color: #888; y: parent.height - 15px; x: 60px + (parent.width - 80px) * 0.33; }
+                                Text { text: "-10s"; color: #888; y: parent.height - 15px; x: 60px + (parent.width - 80px) * 0.66; }
+                                Text { text: "0s"; color: #888; y: parent.height - 15px; x: parent.width - 20px; }
                                 
                                 Rectangle {
                                     x: 60px; y: 10px; width: 80px; height: 120px;
