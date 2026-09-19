@@ -22,6 +22,7 @@ import uvicorn
 from fastmcp import FastMCP
 
 from canopen_studio import agent_security as _sec
+from canopen_studio.diag import mcp_tools as _diag_tools
 from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
 from canopen_studio.stack import CANopenLayer, get_default_registry
 
@@ -43,9 +44,16 @@ mcp = FastMCP(
     "CANopen Studio",
     instructions=(
         "Tools to connect to a CAN bus, send and receive CAN/CANopen frames, "
-        "and inspect network state. Call get_status() first to check connection."
+        "and inspect network state. Call get_status() first to check connection. "
+        "The obd_* tools drive a vehicle OBD-II session over an ELM327 or a native "
+        "CAN adapter; they read only, and call obd_connect() first."
     ),
 )
+
+# OBD-II diagnostics extend this server rather than standing up a second one: one
+# process, one port, one set of guards. The tools registered are read-only; writing to a
+# vehicle goes through canopen_studio.diag.security, which refuses agents by design.
+DIAGNOSTIC_TOOLS = _diag_tools.register(mcp)
 
 # ---------------------------------------------------------------------------
 # Shared state — used when running standalone (no GUI).
@@ -66,6 +74,9 @@ def set_app(app: Any) -> None:
     """Called by canopen_studio.gui to register the GUI app as the state provider."""
     global _app_ref
     _app_ref = app
+    # A native diagnostic session must borrow the bus the capture loop already owns,
+    # rather than opening a second reader on the same adapter.
+    _diag_tools.set_app(app)
 
 
 def _is_connected() -> bool:
