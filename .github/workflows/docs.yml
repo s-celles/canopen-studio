@@ -34,7 +34,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Build documentation with MkDocs
-        run: uv run --with mkdocs-material mkdocs build --strict
+        run: uv run --with mkdocs-material --with mkdocs-llmstxt mkdocs build --strict
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

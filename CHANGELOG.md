@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The UDS write services stay unavailable through MCP, because they stay unimplemented everywhere.
 - Decoding formulas from profiles and imported files are **interpreted, never executed**: parsed to a syntax tree, whitelisted node by node, and evaluated by walking that tree. Nothing is compiled and `eval` is never called, so a profile cannot reach the filesystem, the network or the interpreter. Profile files are read with `yaml.safe_load`, and exponents are bounded.
 
+### Documentation
+- `SECURITY.md`, with private disclosure through GitHub Security Advisories, the components whose security surface is real (the local agent servers, the diagnostic write gate, the formula interpreter, file loading, the updater), what is *not* a vulnerability but a documented property, and the physical-safety notes that matter when a bug can move something.
+- `CODE_OF_CONDUCT.md`: Contributor Covenant 3.0, with the reporting and enforcement sections filled in. Both live in `.github/`, where GitHub picks them up.
+- The documentation build now publishes `llms.txt` and `llms-full.txt` (via `mkdocs-llmstxt`), so a language model can read the documentation without scraping the rendered HTML.
+
 ### Changed
 - `pyyaml` is now a dependency, for the vehicle profile format. `cantools` is an optional `[dbc]` extra rather than a base dependency, since the generic profile and every hand-written one work without it.
 - The MCP server's instructions mention the `obd_*` tools and state that they read only.

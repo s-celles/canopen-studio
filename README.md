@@ -72,6 +72,22 @@ Detailed documentation, architecture guides, decoder tutorials, and screenshots 
 
 ---
 
+## 🤝 Community & Security
+
+- **[Code of Conduct](.github/CODE_OF_CONDUCT.md)** — Contributor Covenant 3.0.
+- **[Security Policy](.github/SECURITY.md)** — report privately through
+  [GitHub Security Advisories](https://github.com/s-celles/canopen-studio/security/advisories/new),
+  never in a public issue.
+
+> ⚠️ This software transmits on real CAN buses and can talk to vehicles. Read the safety
+> notes in the security policy before testing against anything that moves.
+
+For language models: the documentation is published as
+[`llms.txt`](https://s-celles.github.io/canopen-studio/llms.txt) and
+[`llms-full.txt`](https://s-celles.github.io/canopen-studio/llms-full.txt).
+
+---
+
 ## 📄 License
 
 This project is licensed under the **GNU General Public License v3.0** (`GPL-3.0-or-later`).  

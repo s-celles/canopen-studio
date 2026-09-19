@@ -96,13 +96,13 @@ import-torque file profile_id:
 profiles:
     uv run python -c "from canopen_studio.diag.profiles import ProfileLibrary; lib = ProfileLibrary().load(); [print(f'{p.id:24} {p.name}  ({len(p.table)} PIDs)') for p in lib.resolved()]; [print('ERROR:', e) for e in lib.errors]"
 
-# Build static documentation site with MkDocs Material
+# Build static documentation site with MkDocs Material (also emits llms.txt and llms-full.txt)
 doc-build:
-    uv run --with mkdocs-material mkdocs build --strict
+    uv run --with mkdocs-material --with mkdocs-llmstxt mkdocs build --strict
 
 # Serve live documentation locally
 doc-serve:
-    uv run --with mkdocs-material mkdocs serve
+    uv run --with mkdocs-material --with mkdocs-llmstxt mkdocs serve
 
 # Clean temporary files, caches, build artifacts, and documentation site
 clean:
