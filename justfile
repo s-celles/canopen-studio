@@ -138,3 +138,22 @@ build-exe:
 # Build single-file portable Windows executable (.exe)
 build-portable:
     uv run --with pyinstaller python scripts/build_exe.py --clean --onefile
+
+# Build Rust crates (canopen-core and canopen-cli)
+rust-build:
+    cargo build --workspace
+
+# Run Rust unit tests
+rust-test:
+    cargo test --workspace
+
+# Build and link Rust extension into Python package
+rust-python:
+    cargo build --release -p canopen-core --features python
+    @python3 -c "import shutil, glob, os; [shutil.copy(f, 'src/canopen_studio/canopen_core.so') for f in glob.glob('target/release/libcanopen_core.*') if f.endswith(('.so', '.dylib', '.dll'))]"
+    @echo "==> Installed Rust extension to src/canopen_studio/canopen_core.so"
+
+# Run high-speed Rust transmitter benchmark
+rust-bench-tx count="200000":
+    cargo run --release --bin canopen-cli -- bench-tx --count {{count}} --compact
+

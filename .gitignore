@@ -16,12 +16,20 @@
 !/pyproject.toml
 !/justfile
 !/mkdocs.yml
+!/shell.nix
+!/Cargo.toml
+!/Cargo.lock
 
 # 3. Whitelist the Python package (src layout): application modules and protocol stack
 !/src/
 !/src/**
 # ...but never the build metadata setuptools drops next to it
 /src/*.egg-info/
+
+# 4. Whitelist Rust workspace and crates
+!/crates/
+!/crates/**
+target/
 
 # 5. Whitelist documentation assets and screenshots
 !/docs/
@@ -63,4 +71,9 @@ build/
 dist/
 site/
 uv.lock
+target/
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.pyd
 

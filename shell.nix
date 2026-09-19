@@ -6,6 +6,13 @@ pkgs.mkShell {
     (pkgs.python313.withPackages (ps: [ ps.tkinter ]))
     # Fast Python dependency manager
     pkgs.uv
+    # Rust toolchain & build tools for high-performance canopen-core
+    pkgs.cargo
+    pkgs.rustc
+    pkgs.rustfmt
+    pkgs.clippy
+    pkgs.maturin
+    pkgs.pkg-config
     # Required for python-can / hardware interfaces on Linux
     pkgs.linuxHeaders
     # Provides libstdc++.so.6 needed by binary wheels (numpy, matplotlib, etc.)
