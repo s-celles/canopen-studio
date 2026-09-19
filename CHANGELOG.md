@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Phase 1A Native Integration**: The Python `UdpBus` interface now natively instantiates and delegates to the compiled Rust `canopen_core.UdpCanBus` and `canopen_core.CanFrame` objects, achieving wire-speed frame parsing directly in the backend and eliminating `python-can`'s MessagePack overhead.
   - **Phase 1B Global Parsing**: The `CanopenLayer` class in Python now natively offloads protocol classification (SDO, PDO, NMT, Heartbeat) and bitwise decoding to `canopen_core.decode_canopen_message` in Rust.
   - **Phase 1B Virtual Simulator**: The `VirtualCanopenSimulator` math generation and background timing loops (SYNC, Heartbeat, PDO sine waves) have been entirely ported to a native Rust OS thread, eliminating the Python GIL overhead.
+  - **Phase 1C ISO-TP Engine**: The `IsoTpReassembler` used for OBD-II vehicle diagnostics is now fully rewritten in Rust. It tracks multiplexed concurrent diagnostic responses directly in native code, drastically speeding up VIN extraction and PID scanning.
 - **Rust CLI Tool (`crates/canopen-cli`)**:
   - `sniff`: Real-time decoded CANopen and OBD-II network monitoring over UDP.
   - `bench-tx`: High-speed packet generator achieving ~300,000 frames/second.
