@@ -72,6 +72,13 @@ Detailed documentation, architecture guides, decoder tutorials, and screenshots 
 
 ---
 
+## 🗺️ Roadmap & Performance Benchmarks
+
+- **[Development Roadmap](ROADMAP.md)** — Architectural evolution towards a high-performance **Rust** engine, and integration of next-generation agentic AI protocols (**AG-UI**, **A2UI**, **Agent Control Protocol - ACP**).
+- **[Performance Benchmarks](benchmarks.md)** — Empirical latency (CAN ping/pong RTT), bus jitter, and throughput measurements across Linux and macOS.
+
+---
+
 ## 🤝 Community & Security
 
 - **[Code of Conduct](.github/CODE_OF_CONDUCT.md)** — Contributor Covenant 3.0.

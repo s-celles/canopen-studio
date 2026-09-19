@@ -2,7 +2,7 @@
 
 This document records the baseline performance metrics, Round-Trip Time (CAN Ping / Pong latency), and cyclic frame jitter of CANopen Studio implemented in **Python 3.13**.
 
-These measurements serve as the reference baseline to quantify performance improvements achieved through future optimizations or full/partial rewrites in compiled systems languages (**Rust**, **C++**, **Go**).
+These measurements serve as the reference baseline to quantify performance improvements achieved through future optimizations or full/partial rewrites in compiled systems languages (**Rust**, **C++**, **Go**). See the [Development Roadmap](ROADMAP.md) for architectural plans.
 
 ---
 
