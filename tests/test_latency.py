@@ -167,3 +167,20 @@ def test_mcp_latency_tools():
     res = mcp_server.ping_bus()
     assert "error" in res
 
+
+def test_auto_echo_ignores_own_ping():
+    """Verify that auto-echo ignores our own ping request when it loops back."""
+    tracker = LatencyTracker()
+    bus = FakeBus()
+    seq = tracker.send_ping(bus)
+    assert len(bus.sent) == 1
+    ping_req = bus.sent[0]
+
+    # Process own ping request (as if looped back by socket)
+    tracker.process_message(ping_req, bus)
+
+    # Should NOT have sent an echo (bus.sent should still be 1)
+    assert len(bus.sent) == 1
+    # Ping should still be pending
+    assert seq in tracker._pending_pings
+

@@ -133,7 +133,14 @@ class LatencyTracker:
         cid = msg.arbitration_id
 
         # 1. Auto-echo responder: reply immediately to 0x7E0 with 0x7E1
+        # Ignore our own pings that loop back on multicast/virtual interfaces
         if cid == self.ping_req_id and self.auto_echo and bus is not None and not msg.is_remote_frame:
+            if len(msg.data) >= 4:
+                seq = int.from_bytes(msg.data[:4], "little")
+                with self._lock:
+                    if seq in self._pending_pings:
+                        return None  # Own ping looping back — do not echo to self
+
             resp = can.Message(
                 arbitration_id=self.ping_resp_id,
                 data=bytes(msg.data),
