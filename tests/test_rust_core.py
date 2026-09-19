@@ -257,5 +257,128 @@ class TestRustNmt:
         assert nodes_after[0]["is_timed_out"]
 
 
+SAMPLE_EDS_CONTENT = """
+[FileInfo]
+FileName=MotorDrive.eds
+FileVersion=1
+EDSVersion=4.0
+Description=AC Motor Drive Inverter
+
+[DeviceInfo]
+VendorName=InvertCorp
+VendorNumber=0x00000042
+ProductName=Inverter 50kW
+ProductNumber=0x00000100
+
+[1000]
+ParameterName=Device Type
+ObjectType=7
+DataType=0x0007
+AccessType=ro
+DefaultValue=0x00020192
+PDOMapping=0
+
+[1001]
+ParameterName=Error Register
+ObjectType=7
+DataType=0x0005
+AccessType=ro
+DefaultValue=0
+PDOMapping=1
+
+[6040]
+ParameterName=CiA 402 Controlword
+ObjectType=7
+DataType=0x0006
+AccessType=rw
+DefaultValue=0x0000
+PDOMapping=1
+
+[6041]
+ParameterName=CiA 402 Statusword
+ObjectType=7
+DataType=0x0006
+AccessType=ro
+DefaultValue=0x0000
+PDOMapping=1
+
+[1A00]
+ParameterName=TPDO1 Mapping
+ObjectType=9
+SubNumber=2
+
+[1A00sub1]
+ParameterName=TPDO1 Mapping Entry 1
+ObjectType=7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x60410010
+PDOMapping=0
+
+[1A00sub2]
+ParameterName=TPDO1 Mapping Entry 2
+ObjectType=7
+DataType=0x0007
+AccessType=rw
+DefaultValue=0x10010008
+PDOMapping=0
+"""
+
+
+@pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
+class TestRustEds:
+    def test_parse_eds_content(self):
+        eds = canopen_core.EdsFile.parse(SAMPLE_EDS_CONTENT)
+        assert len(eds) == 7
+
+        info = eds.file_info()
+        assert info["file_name"] == "MotorDrive.eds"
+        assert info["eds_version"] == "4.0"
+
+        dev = eds.device_info()
+        assert dev["vendor_name"] == "InvertCorp"
+        assert dev["vendor_number"] == 0x42
+        assert dev["product_name"] == "Inverter 50kW"
+
+    def test_get_objects(self):
+        eds = canopen_core.EdsFile.parse(SAMPLE_EDS_CONTENT)
+
+        dev_type = eds.get_object(0x1000, 0)
+        assert dev_type is not None
+        assert dev_type["name"] == "Device Type"
+        assert dev_type["data_type"] == "UNSIGNED32"
+        assert dev_type["bit_length"] == 32
+        assert dev_type["access"] == "ro"
+        assert not dev_type["pdo_mapping"]
+
+        # Non-existent object
+        assert eds.get_object(0x9999, 0) is None
+
+    def test_pdo_mappable_and_search(self):
+        eds = canopen_core.EdsFile.parse(SAMPLE_EDS_CONTENT)
+        mappable = eds.pdo_mappable_objects()
+        assert len(mappable) == 3  # 1001, 6040, 6041
+
+        matches = eds.find_objects_by_name("controlword")
+        assert len(matches) == 1
+        assert matches[0]["index"] == 0x6040
+        assert matches[0]["access"] == "rw"
+
+    def test_create_pdo_mapping_from_eds(self):
+        eds = canopen_core.EdsFile.parse(SAMPLE_EDS_CONTENT)
+        pdo = eds.create_pdo_mapping(cob_id=0x181, mapping_index=0x1A00)
+        assert pdo.cob_id == 0x181
+
+        frame = canopen_core.CanFrame(0x181, b"\x37\x02\x00\x00\x00\x00\x00\x00")
+        readings = pdo.decode_frame(frame)
+        assert len(readings) == 2
+        assert readings[0]["name"] == "CiA 402 Statusword"
+        assert readings[0]["value"] == 0x0237
+        assert readings[1]["name"] == "Error Register"
+        assert readings[1]["value"] == 0.0
+
+
+
+
 
 

@@ -71,3 +71,22 @@ CANopen uses Network Management (COB-ID `0x000`) for commanding nodes between op
 ### High-Performance Native NMT Engine
 When `canopen_core` is compiled, NMT master command synthesis, state machine tracking, and microsecond-level heartbeat timeout detection are handled in zero-allocation native Rust (`canopen_core.NmtMaster`).
 
+---
+
+## Electronic Data Sheets (EDS) & Object Dictionary Engine (CiA 306)
+
+The compiled native core includes a CiA 306 Electronic Data Sheet parser (`canopen_core.EdsFile`):
+
+- **Device & File Metadata**: Reads `[FileInfo]` and `[DeviceInfo]` (Vendor Name, Vendor ID, Product Code, Revision Number).
+- **Object Dictionary Instantiation**: Parses index entries (`[1000]`) and subindex entries (`[1018sub1]`) with data types (`UNSIGNED32`, `INTEGER16`, `BOOLEAN`, etc.), access permissions (`ro`, `rw`, `const`), and default values.
+- **Automated PDO Mapping Synthesis**: Given a TPDO/RPDO mapping index (e.g. `0x1A00` for TPDO1 or `0x1600` for RPDO1), automatically builds a bit-accurate `PdoMapping` structure with resolved signal names, bit offsets, and engineering types:
+
+```python
+from canopen_studio import canopen_core
+
+eds = canopen_core.EdsFile.load_file("motor_controller.eds")
+tpdo1 = eds.create_pdo_mapping(cob_id=0x181, mapping_index=0x1A00)
+signals = tpdo1.decode_frame(frame)
+```
+
+

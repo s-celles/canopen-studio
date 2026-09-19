@@ -507,6 +507,16 @@ impl PyPdoMapping {
         }
     }
 
+    #[getter]
+    pub fn cob_id(&self) -> u32 {
+        self.inner.cob_id
+    }
+
+    #[getter]
+    pub fn name(&self) -> &str {
+        &self.inner.name
+    }
+
     #[pyo3(signature = (name, bit_start, bit_length, signal_type="uint16", factor=1.0, offset=0.0, unit=""))]
     pub fn add_signal(
         &mut self,
@@ -646,6 +656,132 @@ impl PyNmtMaster {
     }
 }
 
+#[cfg(feature = "python")]
+fn object_entry_to_pydict<'py>(
+    py: Python<'py>,
+    obj: &crate::eds::ObjectEntry,
+) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("index", obj.index)?;
+    d.set_item("subindex", obj.subindex)?;
+    d.set_item("name", &obj.name)?;
+    d.set_item("object_type", obj.object_type)?;
+    d.set_item("data_type", obj.data_type.type_name())?;
+    d.set_item("bit_length", obj.data_type.bit_length())?;
+    d.set_item("access", obj.access.as_str())?;
+    d.set_item("default_value", &obj.default_value)?;
+    d.set_item("pdo_mapping", obj.pdo_mapping)?;
+    d.set_item("low_limit", &obj.low_limit)?;
+    d.set_item("high_limit", &obj.high_limit)?;
+    Ok(d)
+}
+
+#[cfg(feature = "python")]
+#[pyclass(name = "EdsFile")]
+pub struct PyEdsFile {
+    inner: crate::eds::EdsFile,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyEdsFile {
+    #[staticmethod]
+    pub fn parse(content: &str) -> PyResult<Self> {
+        let eds = crate::eds::EdsFile::parse(content)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner: eds })
+    }
+
+    #[staticmethod]
+    pub fn load_file(path: &str) -> PyResult<Self> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| PyValueError::new_err(format!("Cannot read EDS file {}: {}", path, e)))?;
+        Self::parse(&content)
+    }
+
+    pub fn file_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        d.set_item("file_name", &self.inner.file_info.file_name)?;
+        d.set_item("file_version", &self.inner.file_info.file_version)?;
+        d.set_item("description", &self.inner.file_info.description)?;
+        d.set_item("eds_version", &self.inner.file_info.eds_version)?;
+        d.set_item("created_by", &self.inner.file_info.created_by)?;
+        Ok(d)
+    }
+
+    pub fn device_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        d.set_item("vendor_name", &self.inner.device_info.vendor_name)?;
+        d.set_item("vendor_number", self.inner.device_info.vendor_number)?;
+        d.set_item("product_name", &self.inner.device_info.product_name)?;
+        d.set_item("product_number", self.inner.device_info.product_number)?;
+        d.set_item("revision_number", self.inner.device_info.revision_number)?;
+        d.set_item("order_code", &self.inner.device_info.order_code)?;
+        Ok(d)
+    }
+
+    #[pyo3(signature = (index, subindex=0))]
+    pub fn get_object<'py>(
+        &self,
+        py: Python<'py>,
+        index: u16,
+        subindex: u8,
+    ) -> PyResult<Option<Bound<'py, PyDict>>> {
+        match self.inner.get(index, subindex) {
+            Some(obj) => Ok(Some(object_entry_to_pydict(py, obj)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn find_objects_by_name<'py>(
+        &self,
+        py: Python<'py>,
+        query: &str,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let objs = self.inner.find_by_name(query);
+        let mut results = Vec::with_capacity(objs.len());
+        for obj in objs {
+            results.push(object_entry_to_pydict(py, obj)?);
+        }
+        Ok(results)
+    }
+
+    pub fn pdo_mappable_objects<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let objs = self.inner.pdo_mappable();
+        let mut results = Vec::with_capacity(objs.len());
+        for obj in objs {
+            results.push(object_entry_to_pydict(py, obj)?);
+        }
+        Ok(results)
+    }
+
+    pub fn all_objects<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let mut results = Vec::with_capacity(self.inner.len());
+        for obj in self.inner.entries.values() {
+            results.push(object_entry_to_pydict(py, obj)?);
+        }
+        Ok(results)
+    }
+
+    pub fn create_pdo_mapping(&self, cob_id: u32, mapping_index: u16) -> PyPdoMapping {
+        let mapping = self.inner.create_pdo_mapping(cob_id, mapping_index);
+        PyPdoMapping { inner: mapping }
+    }
+
+    pub fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn __repr__(&self) -> String {
+        format!(
+            "<EdsFile entries={} vendor='{}' product='{}'>",
+            self.inner.len(),
+            self.inner.device_info.vendor_name,
+            self.inner.device_info.product_name
+        )
+    }
+}
+
 /// PyO3 C-Python module definition.
 #[cfg(feature = "python")]
 #[pymodule]
@@ -657,6 +793,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIsoTpReassembler>()?;
     m.add_class::<PyPdoMapping>()?;
     m.add_class::<PyNmtMaster>()?;
+    m.add_class::<PyEdsFile>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;

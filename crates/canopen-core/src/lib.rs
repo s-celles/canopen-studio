@@ -6,6 +6,7 @@
  */
 
 pub mod canopen;
+pub mod eds;
 pub mod frame;
 pub mod isotp;
 pub mod latency;
@@ -18,6 +19,7 @@ pub mod sdo;
 pub mod udp;
 
 pub use canopen::{decode_canopen_frame, CanopenMessageInfo, CanopenService, NmtState};
+pub use eds::{AccessType, DataType, DeviceInfo, EdsError, EdsFile, FileInfo, ObjectEntry};
 pub use frame::{CanError, CanFrame};
 pub use isotp::{fragment_isotp_message, IsoTpError, IsoTpReassembler};
 pub use latency::{LatencyStats, LatencyTracker};
