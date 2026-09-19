@@ -384,7 +384,21 @@ pub fn decode_sdo<'py>(
                 d.set_item("node_id", node_id)?;
                 d.set_item("index", index)?;
                 d.set_item("subindex", subindex)?;
-                d.set_item("data", PyBytes::new(py, &data))?;
+                d.set_item("data", data)?;
+            }
+            crate::sdo::SdoMessage::InitiateUploadResponse {
+                node_id,
+                index,
+                subindex,
+                size,
+            } => {
+                d.set_item("type", "INITIATE_UPLOAD_RESPONSE")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+                if let Some(s) = size {
+                    d.set_item("size", s)?;
+                }
             }
             crate::sdo::SdoMessage::ExpeditedDownloadRequest {
                 node_id,
@@ -396,7 +410,21 @@ pub fn decode_sdo<'py>(
                 d.set_item("node_id", node_id)?;
                 d.set_item("index", index)?;
                 d.set_item("subindex", subindex)?;
-                d.set_item("data", PyBytes::new(py, &data))?;
+                d.set_item("data", data)?;
+            }
+            crate::sdo::SdoMessage::InitiateDownloadRequest {
+                node_id,
+                index,
+                subindex,
+                size,
+            } => {
+                d.set_item("type", "INITIATE_DOWNLOAD_REQUEST")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("index", index)?;
+                d.set_item("subindex", subindex)?;
+                if let Some(s) = size {
+                    d.set_item("size", s)?;
+                }
             }
             crate::sdo::SdoMessage::DownloadResponse {
                 node_id,
@@ -407,6 +435,40 @@ pub fn decode_sdo<'py>(
                 d.set_item("node_id", node_id)?;
                 d.set_item("index", index)?;
                 d.set_item("subindex", subindex)?;
+            }
+            crate::sdo::SdoMessage::SegmentDownloadRequest {
+                node_id,
+                toggle,
+                is_last,
+                data,
+            } => {
+                d.set_item("type", "SEGMENT_DOWNLOAD_REQUEST")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("toggle", toggle)?;
+                d.set_item("is_last", is_last)?;
+                d.set_item("data", data)?;
+            }
+            crate::sdo::SdoMessage::SegmentDownloadResponse { node_id, toggle } => {
+                d.set_item("type", "SEGMENT_DOWNLOAD_RESPONSE")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("toggle", toggle)?;
+            }
+            crate::sdo::SdoMessage::SegmentUploadRequest { node_id, toggle } => {
+                d.set_item("type", "SEGMENT_UPLOAD_REQUEST")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("toggle", toggle)?;
+            }
+            crate::sdo::SdoMessage::SegmentUploadResponse {
+                node_id,
+                toggle,
+                is_last,
+                data,
+            } => {
+                d.set_item("type", "SEGMENT_UPLOAD_RESPONSE")?;
+                d.set_item("node_id", node_id)?;
+                d.set_item("toggle", toggle)?;
+                d.set_item("is_last", is_last)?;
+                d.set_item("data", data)?;
             }
             crate::sdo::SdoMessage::Abort {
                 node_id,
@@ -424,14 +486,12 @@ pub fn decode_sdo<'py>(
             crate::sdo::SdoMessage::Other {
                 node_id,
                 cs,
-                index,
-                subindex,
+                payload,
             } => {
                 d.set_item("type", "OTHER")?;
                 d.set_item("node_id", node_id)?;
                 d.set_item("cs", cs)?;
-                d.set_item("index", index)?;
-                d.set_item("subindex", subindex)?;
+                d.set_item("payload", payload)?;
             }
         }
         Ok(Some(d))

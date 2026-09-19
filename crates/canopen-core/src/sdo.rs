@@ -164,7 +164,7 @@ impl SdoAbortCode {
     }
 }
 
-/// SDO Message Types decoded from CAN traffic.
+/// SdoMessage Types decoded from CAN traffic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SdoMessage {
     /// Client initiates upload (read): index, subindex
@@ -180,6 +180,13 @@ pub enum SdoMessage {
         subindex: u8,
         data: Vec<u8>,
     },
+    /// Server normal upload response: index, subindex, optional size
+    InitiateUploadResponse {
+        node_id: u8,
+        index: u16,
+        subindex: u8,
+        size: Option<u32>,
+    },
     /// Client initiates expedited download (write): index, subindex, data bytes
     ExpeditedDownloadRequest {
         node_id: u8,
@@ -187,11 +194,36 @@ pub enum SdoMessage {
         subindex: u8,
         data: Vec<u8>,
     },
+    /// Client normal download request: index, subindex, optional size
+    InitiateDownloadRequest {
+        node_id: u8,
+        index: u16,
+        subindex: u8,
+        size: Option<u32>,
+    },
     /// Server confirms download: index, subindex
     DownloadResponse {
         node_id: u8,
         index: u16,
         subindex: u8,
+    },
+    /// Client sends a segment of data
+    SegmentDownloadRequest {
+        node_id: u8,
+        toggle: bool,
+        is_last: bool,
+        data: Vec<u8>,
+    },
+    /// Server acknowledges a segment of data
+    SegmentDownloadResponse { node_id: u8, toggle: bool },
+    /// Client requests next segment of data
+    SegmentUploadRequest { node_id: u8, toggle: bool },
+    /// Server sends a segment of data
+    SegmentUploadResponse {
+        node_id: u8,
+        toggle: bool,
+        is_last: bool,
+        data: Vec<u8>,
     },
     /// SDO Abort transfer: index, subindex, abort code
     Abort {
@@ -200,16 +232,13 @@ pub enum SdoMessage {
         subindex: u8,
         code: SdoAbortCode,
     },
-    /// Other SDO transaction (segmented, block transfer)
+    /// Other unparsed SDO transaction
     Other {
         node_id: u8,
         cs: u8,
-        index: u16,
-        subindex: u8,
+        payload: Vec<u8>,
     },
 }
-
-/// Build an SDO Initiate Upload Request frame (Read request).
 pub fn build_sdo_read(node_id: u8, index: u16, subindex: u8) -> Result<CanFrame, CanError> {
     let cob_id = 0x600 + (node_id as u32);
     let idx_bytes = index.to_le_bytes();
@@ -280,119 +309,208 @@ pub fn build_sdo_abort(
 pub fn parse_sdo_frame(frame: &CanFrame) -> Option<SdoMessage> {
     let id = frame.id;
     let payload = frame.payload();
-    if payload.len() < 4 {
+    if payload.is_empty() {
         return None;
     }
 
     let cs = payload[0];
-    let index = u16::from_le_bytes([payload[1], payload[2]]);
-    let subindex = payload[3];
+
+    // Helper for extracting index/subindex assuming payload has at least 4 bytes
+    let get_idx = |p: &[u8]| -> Option<(u16, u8)> {
+        if p.len() >= 4 {
+            let index = u16::from_le_bytes([p[1], p[2]]);
+            Some((index, p[3]))
+        } else {
+            None
+        }
+    };
 
     // Client -> Server (0x601..=0x67F)
     if (0x601..=0x67F).contains(&id) {
         let node_id = (id - 0x600) as u8;
+
         if cs == 0x40 {
-            return Some(SdoMessage::UploadRequest {
-                node_id,
-                index,
-                subindex,
-            });
-        }
-        if (cs & 0xE0) == 0x20 {
-            // Initiate Download (Write)
-            let is_expedited = (cs & 0x02) != 0;
-            let size_indicated = (cs & 0x01) != 0;
-            if is_expedited {
-                let n = if size_indicated {
-                    ((cs >> 2) & 0x03) as usize
-                } else {
-                    0
-                };
-                let data_len = 4 - n;
-                let data_slice = if payload.len() >= 4 + data_len {
-                    &payload[4..4 + data_len]
-                } else {
-                    &[]
-                };
-                return Some(SdoMessage::ExpeditedDownloadRequest {
+            if let Some((index, subindex)) = get_idx(payload) {
+                return Some(SdoMessage::UploadRequest {
                     node_id,
                     index,
                     subindex,
-                    data: data_slice.to_vec(),
                 });
             }
-        }
-        if cs == 0x80 && payload.len() >= 8 {
-            let code_u32 = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-            return Some(SdoMessage::Abort {
+        } else if (cs & 0xE0) == 0x20 {
+            if let Some((index, subindex)) = get_idx(payload) {
+                let is_expedited = (cs & 0x02) != 0;
+                let size_indicated = (cs & 0x01) != 0;
+                if is_expedited {
+                    let n = if size_indicated {
+                        ((cs >> 2) & 0x03) as usize
+                    } else {
+                        0
+                    };
+                    let data_len = 4_usize.saturating_sub(n);
+                    let data_slice = if payload.len() >= 4 + data_len {
+                        &payload[4..4 + data_len]
+                    } else {
+                        &[]
+                    };
+                    return Some(SdoMessage::ExpeditedDownloadRequest {
+                        node_id,
+                        index,
+                        subindex,
+                        data: data_slice.to_vec(),
+                    });
+                } else {
+                    let size = if size_indicated && payload.len() >= 8 {
+                        Some(u32::from_le_bytes([
+                            payload[4], payload[5], payload[6], payload[7],
+                        ]))
+                    } else {
+                        None
+                    };
+                    return Some(SdoMessage::InitiateDownloadRequest {
+                        node_id,
+                        index,
+                        subindex,
+                        size,
+                    });
+                }
+            }
+        } else if (cs & 0xE0) == 0x00 {
+            let toggle = (cs & 0x10) != 0;
+            let n = ((cs >> 1) & 0x07) as usize;
+            let is_last = (cs & 0x01) != 0;
+            let data_len = 7_usize.saturating_sub(n);
+            let data_slice = if payload.len() > data_len {
+                &payload[1..1 + data_len]
+            } else {
+                &[]
+            };
+            return Some(SdoMessage::SegmentDownloadRequest {
                 node_id,
-                index,
-                subindex,
-                code: SdoAbortCode::from(code_u32),
+                toggle,
+                is_last,
+                data: data_slice.to_vec(),
             });
+        } else if (cs & 0xE0) == 0x60 {
+            let toggle = (cs & 0x10) != 0;
+            return Some(SdoMessage::SegmentUploadRequest { node_id, toggle });
+        } else if cs == 0x80 {
+            if let Some((index, subindex)) = get_idx(payload) {
+                if payload.len() >= 8 {
+                    let code_u32 =
+                        u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+                    return Some(SdoMessage::Abort {
+                        node_id,
+                        index,
+                        subindex,
+                        code: SdoAbortCode::from(code_u32),
+                    });
+                }
+            }
         }
+
         return Some(SdoMessage::Other {
             node_id,
             cs,
-            index,
-            subindex,
+            payload: payload.to_vec(),
         });
     }
 
     // Server -> Client (0x581..=0x5FF)
     if (0x581..=0x5FF).contains(&id) {
         let node_id = (id - 0x580) as u8;
-        if cs == 0x60 {
-            return Some(SdoMessage::DownloadResponse {
-                node_id,
-                index,
-                subindex,
-            });
-        }
-        if (cs & 0xE0) == 0x40 {
-            // Initiate Upload Response (Read reply)
-            let is_expedited = (cs & 0x02) != 0;
-            let size_indicated = (cs & 0x01) != 0;
-            if is_expedited {
-                let n = if size_indicated {
-                    ((cs >> 2) & 0x03) as usize
-                } else {
-                    0
-                };
-                let data_len = 4 - n;
-                let data_slice = if payload.len() >= 4 + data_len {
-                    &payload[4..4 + data_len]
-                } else {
-                    &[]
-                };
-                return Some(SdoMessage::ExpeditedUploadResponse {
+
+        if (cs & 0xE0) == 0x60 {
+            // Initiate Download Response (cs=3 => 0x60)
+            if let Some((index, subindex)) = get_idx(payload) {
+                return Some(SdoMessage::DownloadResponse {
                     node_id,
                     index,
                     subindex,
-                    data: data_slice.to_vec(),
                 });
             }
-        }
-        if cs == 0x80 && payload.len() >= 8 {
-            let code_u32 = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
-            return Some(SdoMessage::Abort {
+        } else if (cs & 0xE0) == 0x40 {
+            if let Some((index, subindex)) = get_idx(payload) {
+                let is_expedited = (cs & 0x02) != 0;
+                let size_indicated = (cs & 0x01) != 0;
+                if is_expedited {
+                    let n = if size_indicated {
+                        ((cs >> 2) & 0x03) as usize
+                    } else {
+                        0
+                    };
+                    let data_len = 4_usize.saturating_sub(n);
+                    let data_slice = if payload.len() >= 4 + data_len {
+                        &payload[4..4 + data_len]
+                    } else {
+                        &[]
+                    };
+                    return Some(SdoMessage::ExpeditedUploadResponse {
+                        node_id,
+                        index,
+                        subindex,
+                        data: data_slice.to_vec(),
+                    });
+                } else {
+                    let size = if size_indicated && payload.len() >= 8 {
+                        Some(u32::from_le_bytes([
+                            payload[4], payload[5], payload[6], payload[7],
+                        ]))
+                    } else {
+                        None
+                    };
+                    return Some(SdoMessage::InitiateUploadResponse {
+                        node_id,
+                        index,
+                        subindex,
+                        size,
+                    });
+                }
+            }
+        } else if (cs & 0xE0) == 0x20 {
+            let toggle = (cs & 0x10) != 0;
+            return Some(SdoMessage::SegmentDownloadResponse { node_id, toggle });
+        } else if (cs & 0xE0) == 0x00 {
+            // Segment Upload Response
+            let toggle = (cs & 0x10) != 0;
+            let n = ((cs >> 1) & 0x07) as usize;
+            let is_last = (cs & 0x01) != 0;
+            let data_len = 7_usize.saturating_sub(n);
+            let data_slice = if payload.len() > data_len {
+                &payload[1..1 + data_len]
+            } else {
+                &[]
+            };
+            return Some(SdoMessage::SegmentUploadResponse {
                 node_id,
-                index,
-                subindex,
-                code: SdoAbortCode::from(code_u32),
+                toggle,
+                is_last,
+                data: data_slice.to_vec(),
             });
+        } else if cs == 0x80 {
+            if let Some((index, subindex)) = get_idx(payload) {
+                if payload.len() >= 8 {
+                    let code_u32 =
+                        u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+                    return Some(SdoMessage::Abort {
+                        node_id,
+                        index,
+                        subindex,
+                        code: SdoAbortCode::from(code_u32),
+                    });
+                }
+            }
         }
+
         return Some(SdoMessage::Other {
             node_id,
             cs,
-            index,
-            subindex,
+            payload: payload.to_vec(),
         });
     }
 
     None
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,5 +596,33 @@ mod tests {
             SdoAbortCode::SubIndexDoesNotExist.description(),
             "Sub-index does not exist"
         );
+    }
+}
+
+#[cfg(test)]
+mod segmented_tests {
+    use super::*;
+
+    #[test]
+    fn test_sdo_segmented_download() {
+        // Client Request Segment
+        let payload = [0x00 | 0x10 | 0x01, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11];
+        let frame = CanFrame::new(0x605, &payload).unwrap();
+        let msg = parse_sdo_frame(&frame).unwrap();
+        if let SdoMessage::SegmentDownloadRequest {
+            node_id,
+            toggle,
+            is_last,
+            data,
+        } = msg
+        {
+            assert_eq!(node_id, 5);
+            assert_eq!(toggle, true);
+            assert_eq!(is_last, true); // c=1
+                                       // n = 0, so 7 bytes data
+            assert_eq!(data, vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11]);
+        } else {
+            panic!("Wrong message type");
+        }
     }
 }
