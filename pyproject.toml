@@ -51,7 +51,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["canopen_studio", "canopen_studio.stack", "canopen_studio.stack.decoders"]
+packages = [
+    "canopen_studio",
+    "canopen_studio.stack",
+    "canopen_studio.stack.decoders",
+    "canopen_studio.diag",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "canopen_studio.__version__" }
