@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - High-throughput `TraceRingBuffer` with snapshotting and filtering by arbitration ID/mask.
   - Sub-microsecond `LatencyTracker` measuring periodic frame intervals and clock jitter (e.g. 50 Hz SYNC = 20,000 µs nominal) and RTT statistics.
   - Cross-platform `UdpCanBus` with `SO_REUSEADDR`, `SO_REUSEPORT`, and `SO_BROADCAST`.
-  - CANopen Service Data Object (SDO) client & server protocol engine (CiA 301): expedited upload (read), expedited download (write), and abort code decoding.
+  - CANopen Service Data Object (SDO) client & server protocol engine (CiA 301): expedited upload (read), expedited download (write), segmented block transfers, and abort code decoding.
   - **Process Data Object (PDO) Signal Mapping & Packing Engine**: Bit-level packing and extraction for arbitrary integer and boolean signals with scale factor, offset, and physical engineering units (`PdoMapping`, `SignalDefinition`).
   - **ISO-TP (ISO 15765-2) Multi-Frame Transport Engine**: Single Frame (SF), First Frame (FF), Consecutive Frame (CF) reassembly, and automatic Flow Control (FC) frame emission for diagnostic messages up to 4095 bytes.
   - Native CANopen service decoders (NMT, SYNC, TIME, EMCY, TPDO1..4, RPDO1..4, TSDO, RSDO, Heartbeat) and OBD-II SAE J1979 Mode 01 PID and DTC decoders.
