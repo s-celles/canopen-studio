@@ -11,6 +11,14 @@ License: GNU General Public License v3.0 (GPL-3.0-or-later)
 Copyright (C) 2026 Sébastien Celles
 """
 
+from .security import (
+    WRITE_ENABLED_ENV,
+    DiagnosticWriteRefused,
+    WhitelistEntry,
+    WriteGate,
+    clear_trouble_codes,
+    writes_enabled,
+)
 from .interface import (
     DEFAULT_TIMEOUT,
     NEGATIVE_RESPONSE,
@@ -29,6 +37,12 @@ from .interface import (
 
 __all__ = [
     "DEFAULT_TIMEOUT",
+    "WRITE_ENABLED_ENV",
+    "DiagnosticWriteRefused",
+    "WhitelistEntry",
+    "WriteGate",
+    "clear_trouble_codes",
+    "writes_enabled",
     "NEGATIVE_RESPONSE",
     "POSITIVE_RESPONSE_OFFSET",
     "DiagnosticError",
