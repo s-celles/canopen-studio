@@ -1,10 +1,10 @@
-import { Button, CheckBox, ComboBox, LineEdit, TabWidget, StandardTableView } from "std-widgets.slint";
+import { Button, CheckBox, ComboBox, LineEdit, TabWidget, StandardTableView, Palette } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     width: 1150px;
     height: 800px;
     title: "CAN & CANopen Studio - Universal Protocol Analyzer & Transmit Station";
-    background: #f0f0f0;
+    background: Palette.background;
 
     in-out property <int> rpm: 0;
     in-out property <int> torque: 0;
@@ -30,8 +30,8 @@ export component MainWindow inherits Window {
         // TOP BAR
         Rectangle {
             height: 50px;
-            background: #f8f8f8;
-            border-color: #d0d0d0;
+            background: Palette.control-background;
+            border-color: Palette.border;
             border-width: 1px;
             
             HorizontalLayout {
@@ -39,16 +39,16 @@ export component MainWindow inherits Window {
                 spacing: 10px;
                 alignment: start;
                 
-                Text { text: "Interface:"; vertical-alignment: center; }
+                Text { text: "Interface:"; vertical-alignment: center; color: Palette.foreground; }
                 ComboBox { model: ["Virtual Simulator", "UDP Multicast", "SocketCAN"]; current-index: 1; width: 140px; }
                 
-                Text { text: "Channel:"; vertical-alignment: center; }
+                Text { text: "Channel:"; vertical-alignment: center; color: Palette.foreground; }
                 ComboBox { model: ["127.0.0.1:1750", "224.0.0.1:1750", "can0"]; current-index: 0; width: 130px; }
                 
-                Text { text: "Bitrate:"; vertical-alignment: center; }
+                Text { text: "Bitrate:"; vertical-alignment: center; color: Palette.foreground; }
                 ComboBox { model: ["500000", "250000", "1000000"]; current-index: 0; width: 90px; }
 
-                Text { text: "Profile:"; vertical-alignment: center; }
+                Text { text: "Profile:"; vertical-alignment: center; color: Palette.foreground; }
                 ComboBox { model: ["All / Auto", "CiA 402", "SEVCON"]; current-index: 0; width: 100px; }
 
                 Button { text: "Disconnect"; }
@@ -75,8 +75,8 @@ export component MainWindow inherits Window {
                     // Bus Statistics
                     Rectangle {
                         height: 35px;
-                        background: #ffffff;
-                        border-color: #e0e0e0;
+                        background: Palette.control-background;
+                        border-color: Palette.border;
                         border-width: 1px;
                         HorizontalLayout {
                             padding-left: 15px;
@@ -84,8 +84,8 @@ export component MainWindow inherits Window {
                             spacing: 30px;
                             alignment: start;
                             Text { text: "Bus Rate: " + root.bus_rate; color: #0066cc; font-weight: 700; vertical-alignment: center; }
-                            Text { text: "Total Received: " + root.total_rx; vertical-alignment: center; }
-                            Text { text: "Total Transmitted: 0"; vertical-alignment: center; }
+                            Text { text: "Total Received: " + root.total_rx; color: Palette.foreground; vertical-alignment: center; }
+                            Text { text: "Total Transmitted: 0"; color: Palette.foreground; vertical-alignment: center; }
                             Rectangle { horizontal-stretch: 1; }
                             Text { text: "Active Nodes: " + root.active_nodes; color: #228b22; font-weight: 700; vertical-alignment: center; }
                         }
@@ -97,7 +97,7 @@ export component MainWindow inherits Window {
                         // Left: Discovered Nodes
                         VerticalLayout {
                             width: 500px;
-                            Text { text: "Discovered CANopen Network Nodes (CiA 301)"; font-size: 13px; color: #555555; }
+                            Text { text: "Discovered CANopen Network Nodes (CiA 301)"; font-size: 13px; color: Palette.foreground; }
                             Rectangle { height: 5px; }
                             StandardTableView {
                                 columns: [
@@ -112,7 +112,7 @@ export component MainWindow inherits Window {
                         
                         // Right: Dynamic Telemetry
                         VerticalLayout {
-                            Text { text: "Dynamic Telemetry (CiA 402 / SEVCON)"; font-size: 13px; color: #555555; }
+                            Text { text: "Dynamic Telemetry (CiA 402 / SEVCON)"; font-size: 13px; color: Palette.foreground; }
                             Rectangle { height: 5px; }
                             
                             GridLayout {
@@ -120,50 +120,50 @@ export component MainWindow inherits Window {
                                 
                                 Rectangle {
                                     col: 0; row: 0;
-                                    background: #ffffff;
-                                    border-color: #e0e0e0;
+                                    background: Palette.control-background;
+                                    border-color: Palette.border;
                                     border-width: 1px;
                                     VerticalLayout {
                                         padding: 10px;
-                                        Text { text: "Motor Speed (0x606C)"; font-size: 11px; color: #666; }
+                                        Text { text: "Motor Speed (0x606C)"; font-size: 11px; color: Palette.foreground; }
                                         Text { text: root.rpm + " RPM"; font-size: 32px; font-weight: 700; color: #0078d7; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
-                                        Text { text: "Max: 5000 RPM"; font-size: 11px; color: #666; horizontal-alignment: center; }
+                                        Text { text: "Max: 5000 RPM"; font-size: 11px; color: Palette.foreground; horizontal-alignment: center; }
                                     }
                                 }
                                 
                                 Rectangle {
                                     col: 1; row: 0;
-                                    background: #ffffff;
-                                    border-color: #e0e0e0;
+                                    background: Palette.control-background;
+                                    border-color: Palette.border;
                                     border-width: 1px;
                                     VerticalLayout {
                                         padding: 10px;
-                                        Text { text: "Target Torque / Status"; font-size: 11px; color: #666; }
+                                        Text { text: "Target Torque / Status"; font-size: 11px; color: Palette.foreground; }
                                         Text { text: root.torque; font-size: 32px; font-weight: 700; color: #d9534f; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
-                                        Text { text: "State: Operation Enabled"; font-size: 11px; color: #666; horizontal-alignment: center; }
+                                        Text { text: "State: Operation Enabled"; font-size: 11px; color: Palette.foreground; horizontal-alignment: center; }
                                     }
                                 }
                                 
                                 Rectangle {
                                     col: 0; row: 1;
-                                    background: #ffffff;
-                                    border-color: #e0e0e0;
+                                    background: Palette.control-background;
+                                    border-color: Palette.border;
                                     border-width: 1px;
                                     VerticalLayout {
                                         padding: 10px;
-                                        Text { text: "Inverter / Heatsink Temp"; font-size: 11px; color: #666; }
+                                        Text { text: "Inverter / Heatsink Temp"; font-size: 11px; color: Palette.foreground; }
                                         Text { text: root.temp_inv + " °C"; font-size: 32px; font-weight: 700; color: #f0ad4e; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
                                     }
                                 }
                                 
                                 Rectangle {
                                     col: 1; row: 1;
-                                    background: #ffffff;
-                                    border-color: #e0e0e0;
+                                    background: Palette.control-background;
+                                    border-color: Palette.border;
                                     border-width: 1px;
                                     VerticalLayout {
                                         padding: 10px;
-                                        Text { text: "Motor Temperature"; font-size: 11px; color: #666; }
+                                        Text { text: "Motor Temperature"; font-size: 11px; color: Palette.foreground; }
                                         Text { text: root.temp_motor; font-size: 32px; font-weight: 700; color: #5cb85c; horizontal-alignment: center; vertical-stretch: 1; vertical-alignment: center; }
                                     }
                                 }
@@ -185,13 +185,13 @@ export component MainWindow inherits Window {
                             spacing: 10px;
                             alignment: start;
                             
-                            Text { text: "Target Mode:"; vertical-alignment: center; }
+                            Text { text: "Target Mode:"; vertical-alignment: center; color: Palette.foreground; }
                             ComboBox { model: ["CAN ID (Raw Bytes)", "Decoded Signal"]; current-index: 0; width: 150px; }
                             
-                            Text { text: "Target ID / Signal:"; vertical-alignment: center; }
+                            Text { text: "Target ID / Signal:"; vertical-alignment: center; color: Palette.foreground; }
                             ComboBox { model: ["0x473"]; current-index: 0; width: 120px; }
                             
-                            Text { text: "Format:"; vertical-alignment: center; }
+                            Text { text: "Format:"; vertical-alignment: center; color: Palette.foreground; }
                             ComboBox { model: ["All Bytes (B0..B7)"]; current-index: 0; width: 140px; }
                             
                             Button { text: "Pause Plot"; }
@@ -199,7 +199,7 @@ export component MainWindow inherits Window {
                         }
                     }
                     
-                    // Graph Area (Dark background like matplotlib dark_background)
+                    // Graph Area (Dark background like matplotlib dark_background, this should stay dark)
                     Rectangle {
                         background: #1e1e1e;
                         border-width: 1px;
@@ -212,17 +212,9 @@ export component MainWindow inherits Window {
                             
                             Rectangle {
                                 clip: true;
-                                Path {
-                                    commands: root.plot_path_b0;
-                                    stroke: #00BFFF; // Blue
-                                    stroke-width: 1.5px;
-                                }
-                                Path {
-                                    commands: root.plot_path_b1;
-                                    stroke: #32CD32; // Green
-                                    stroke-width: 1.5px;
-                                }
-                                // Labels
+                                Path { commands: root.plot_path_b0; stroke: #00BFFF; stroke-width: 1.5px; }
+                                Path { commands: root.plot_path_b1; stroke: #32CD32; stroke-width: 1.5px; }
+                                
                                 Text { text: "250 -"; color: #888; y: 10px; x: 10px; }
                                 Text { text: "200 -"; color: #888; y: parent.height * 0.2; x: 10px; }
                                 Text { text: "150 -"; color: #888; y: parent.height * 0.4; x: 10px; }
@@ -230,7 +222,6 @@ export component MainWindow inherits Window {
                                 Text { text: " 50 -"; color: #888; y: parent.height * 0.8; x: 10px; }
                                 Text { text: "  0 -"; color: #888; y: parent.height * 0.95; x: 10px; }
                                 
-                                // Fake Legend
                                 Rectangle {
                                     x: 60px; y: 10px; width: 80px; height: 120px;
                                     background: #222; border-color: #555; border-width: 1px;
@@ -248,11 +239,11 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-            Tab { title: "📋 Real-time Trace"; Text { text: "Under Construction"; } }
-            Tab { title: "🚀 Transmit & Control"; Text { text: "Under Construction"; } }
-            Tab { title: "📖 SDO Object Dictionary"; Text { text: "Under Construction"; } }
-            Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Under Construction"; } }
-            Tab { title: "📚 CANopen Reference"; Text { text: "Under Construction"; } }
+            Tab { title: "📋 Real-time Trace"; Text { text: "Under Construction"; color: Palette.foreground; } }
+            Tab { title: "🚀 Transmit & Control"; Text { text: "Under Construction"; color: Palette.foreground; } }
+            Tab { title: "📖 SDO Object Dictionary"; Text { text: "Under Construction"; color: Palette.foreground; } }
+            Tab { title: "🔧 Hardware Diagnostics"; Text { text: "Under Construction"; color: Palette.foreground; } }
+            Tab { title: "📚 CANopen Reference"; Text { text: "Under Construction"; color: Palette.foreground; } }
         }
     }
 }
