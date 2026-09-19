@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/canopen-core",
     "crates/canopen-cli",
+    "crates/canopen-gui", "crates/canopen-gui",
 ]
 
 [workspace.package]

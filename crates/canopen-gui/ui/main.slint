@@ -1,0 +1,38 @@
+export component MainWindow inherits Window {
+    width: 800px;
+    height: 600px;
+    title: "CAN & CANopen Studio";
+
+    in-out property <int> rpm: 0;
+    in-out property <string> nmt_state: "Pre-Operational";
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 20px;
+
+        Text {
+            text: "CANopen Studio - Rust + Slint Engine";
+            font-size: 24px;
+            horizontal-alignment: center;
+        }
+
+        Rectangle {
+            background: #2a2a2a;
+            border-radius: 8px;
+            
+            VerticalLayout {
+                padding: 20px;
+                Text {
+                    text: "Motor Speed: " + root.rpm + " RPM";
+                    font-size: 32px;
+                    color: white;
+                }
+                Text {
+                    text: "Heartbeat: " + root.nmt_state;
+                    font-size: 18px;
+                    color: #888888;
+                }
+            }
+        }
+    }
+}
