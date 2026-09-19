@@ -20,6 +20,7 @@
 - **Network Node Monitor**: Live discovery of nodes, state tracking (Operational, Pre-Op, Stopped), and visual dials.
 - **Full Transmission Console**: Generic NMT Master (Start/Stop/Reset), 50 Hz SYNC clock generator, and frame templates library.
 - **SDO Explorer**: Expedited dictionary reader & writer for node inspection.
+- **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle, never assumed; declarative vehicle profiles with inheritance; read-only by default.
 - **In-App Updater**: Automated background checks against GitHub Releases and 1-click upgrade.
 
 ---

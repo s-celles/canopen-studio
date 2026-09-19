@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-19
+
+### Added
+- **OBD-II vehicle diagnostics (SAE J1979)**, in two independently testable parts: an adapter backend and an application layer.
+- `DiagnosticInterface`, a transport-neutral abstraction deliberately separate from the CAN adapter catalog. An ELM327 is not a transparent bridge — it runs its own protocol autodetection and ISO-TP handling and answers in ASCII hexadecimal — so it cannot honour the contract that `open_can_bus()` consumers (the CANopen layer, the trace, the plotter, the bridge) all depend on.
+- `ElmDiagnosticInterface`: ELM327 over USB, classic Bluetooth SPP (via a bound `rfcomm` or `COMx` port) and TCP. Bluetooth Low Energy is documented as unsupported, because BLE adapters expose a vendor-specific GATT service rather than a serial port.
+- `NativeCanDiagnosticInterface`: ISO 15765-2 over every adapter already in the catalog — SLCAN, PCAN, Kvaser, Vector, IXXAT, gs_usb, SocketCAN, UDP multicast and the virtual bus — with no ELM327 in the way.
+- Runtime ELM327 capability probing. Counterfeit boards commonly report a version their firmware does not live up to, so the version is read but never trusted: each capability is probed by sending the command and watching for `?`, the effective version is capped at the evidence, and the session degrades instead of failing.
+- Robust ELM327 reply parsing: framing on the `>` prompt, echo removal, `SEARCHING...` / `BUS INIT` / power-alert chatter (including when an adapter glues it to the data), and explicit handling of `NO DATA`, `CAN ERROR`, `UNABLE TO CONNECT`, `BUFFER FULL`, `STOPPED` and `?`. A status word is reported rather than raised, since `NO DATA` is the ordinary answer to an unsupported PID.
+- SAE J1979 modes 01 through 0A, supported-PID discovery from the vehicle's own bitmasks (`0x00`, `0x20`, `0x40` …) tracked per ECU, ISO 15031-6 trouble codes with the P/C/B/U prefixes, and VIN reading via mode 09 PID 02 with ISO 3779 decoding.
+- Declarative vehicle profiles with inheritance (generic J1979 → make → model and year) and a four-stage resolution cascade: VIN, supported-PID fingerprint, manual choice, then generic J1979. Resolution never fails, because a wrong-but-specific profile would decode a manufacturer PID into a plausible-looking wrong number.
+- The generic `j1979_base` profile as shipped data, covering mode 01 (`0x00`–`0x60`) and mode 09, verified by tests against the standard's own worked values.
+- Importers for Torque Pro custom-PID CSV exports and for DBC databases (via the optional `cantools` extra, `canopen-studio[dbc]`). Both skip a definition they cannot express exactly, with a reason, rather than importing one that would decode to a plausible wrong number.
+- Nine read-only `obd_*` MCP tools on the **existing** server — one process, one port, one set of guards.
+- An **🩺 OBD-II Diagnostics** GUI tab: adapter selection, vehicle identification, supported-parameter discovery and live reading, trouble codes, and a gated clear.
+- Opt-in integration tests against Ircama's ELM327-emulator (`just test-emulator`), plus an in-repository ELM327 fake that carries the everyday suite with nothing installed.
+- `just` recipes: `test-emulator`, `emulator`, `import-torque`, `profiles`.
+
+### Security
+- Diagnostic writes are off by default and pass three independent gates: the `CANOPEN_STUDIO_DIAG_WRITE` environment flag (following the `CANOPEN_STUDIO_A2A` pattern), a per-profile `write_whitelist`, and an explicit per-call confirmation that never persists. A refused write transmits nothing.
+- The UDS write services `0x2E`, `0x31` and `0x2F` have **no request path** in this release and are refused even with every gate open. The gate exists so that adding one is a deliberate change rather than an accident.
+- Clearing trouble codes (mode 04) is implemented but gated, and the GUI states what it costs: it erases the readiness monitors, which need a full drive cycle to rebuild and without which an emissions test fails.
+- No write is exposed to MCP. An agent holding a tool schema is not the person who set an environment variable and confirmed a specific call.
+- Decoding formulas from profiles and imported files are **interpreted, never executed**: parsed to a syntax tree, whitelisted node by node, and evaluated by walking that tree. Nothing is compiled and `eval` is never called, so a profile cannot reach the filesystem, the network or the interpreter. Profile files are read with `yaml.safe_load`, and exponents are bounded.
+
+### Changed
+- `pyyaml` is now a dependency, for the vehicle profile format. `cantools` is an optional `[dbc]` extra rather than a base dependency, since the generic profile and every hand-written one work without it.
+- The MCP server's instructions mention the `obd_*` tools and state that they read only.
+
+### Notes
+- Only the CAN protocols of ISO 15765-4 are parsed. A session that autodetects K-line (ISO 9141-2, ISO 14230-4) or J1850 says which protocol it found and stops, rather than mis-parsing a differently framed reply.
+- `ELM327-emulator` is intentionally **not** a development dependency: it is licensed CC-BY-NC-SA-4.0, which is non-commercial and non-OSI, and adding it to the default dev group of a GPL project would impose that on everyone running the suite. It runs as a separate process, so nothing is redistributed, and the tests that need it skip with an instruction when it is absent.
+
 ## [0.4.0] - 2026-09-19
 
 ### Security

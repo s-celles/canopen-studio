@@ -80,6 +80,22 @@ listen-only:
 sample count="20":
     uv run can-sniffer -c {{count}}
 
+# Run the OBD-II integration tests against Ircama's ELM327 emulator (installed on demand)
+test-emulator:
+    uv run --with ELM327-emulator pytest -m emulator -v
+
+# Start Ircama's ELM327 emulator on TCP port 35000 for manual testing (Ctrl-C to stop)
+emulator scenario="car" port="35000":
+    uv run --with ELM327-emulator python -m elm -n {{port}} -s {{scenario}}
+
+# Import a Torque Pro custom-PID CSV into a vehicle profile (e.g. just import-torque pids.csv my_car)
+import-torque file profile_id:
+    uv run python -c "from canopen_studio.diag.profiles.importers import import_torque_csv; import sys, yaml; r = import_torque_csv('{{file}}', '{{profile_id}}'); print(r); [print(' skipped:', s) for s in r.skipped]"
+
+# List the vehicle profiles available to the OBD-II diagnostics
+profiles:
+    uv run python -c "from canopen_studio.diag.profiles import ProfileLibrary; lib = ProfileLibrary().load(); [print(f'{p.id:24} {p.name}  ({len(p.table)} PIDs)') for p in lib.resolved()]; [print('ERROR:', e) for e in lib.errors]"
+
 # Build static documentation site with MkDocs Material
 doc-build:
     uv run --with mkdocs-material mkdocs build --strict

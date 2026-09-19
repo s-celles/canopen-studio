@@ -30,6 +30,8 @@ theme:
 
 markdown_extensions:
   - admonition
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -48,6 +50,7 @@ nav:
   - Telemetry & Oscilloscope: telemetry.md
   - Transmission Console: transmission.md
   - SDO & NMT Master: sdo_nmt.md
+  - OBD-II Vehicle Diagnostics: obd.md
   - AI Integration (MCP & A2A): ai_integration.md
   - Screenshots Gallery: gallery.md
   - In-App Updates: updates.md
