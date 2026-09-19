@@ -22,7 +22,7 @@ impl SimulatorState {
             nmt_state_node1: 0x7F, // Pre-Operational
             nmt_state_node2: 0x7F,
             sim_rpm: 1800,
-            running: Arc::new(AtomicBool::new(false)),
+            running: Arc::new(AtomicBool::new(true)),
         }
     }
 }

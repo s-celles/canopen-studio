@@ -12,10 +12,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui_handle: Weak<MainWindow> = ui.as_weak();
 
     // Start background simulation thread on Multicast so all local sniffers get it!
-    spawn_udp_simulator("224.0.0.1", 1750);
+    spawn_udp_simulator("127.0.0.1", 1750);
 
     thread::spawn(move || {
-        let bus = match UdpCanBus::new(1750, "224.0.0.1", 1750, true) {
+        let bus = match UdpCanBus::new(1750, "127.0.0.1", 1750, true) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("Failed to bind UdpCanBus: {:?}", e);
