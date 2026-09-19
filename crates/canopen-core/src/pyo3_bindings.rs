@@ -585,42 +585,74 @@ pub fn decode_sdo<'py>(
 }
 
 #[cfg(feature = "python")]
+#[pyclass(name = "FeedResult")]
+pub struct PyFeedResult {
+    #[pyo3(get)]
+    pub completed: Option<PyObject>,
+    #[pyo3(get)]
+    pub flow_control_required: bool,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyFeedResult {
+    fn __bool__(&self) -> bool {
+        self.completed.is_some()
+    }
+}
+
+#[cfg(feature = "python")]
 #[pyclass(name = "IsoTpReassembler")]
 pub struct PyIsoTpReassembler {
-    inner: crate::isotp::IsoTpReassembler,
+    manager: crate::isotp_manager::IsoTpManager,
 }
 
 #[cfg(feature = "python")]
 #[pymethods]
 impl PyIsoTpReassembler {
     #[new]
-    pub fn new(expected_rx_id: u32, tx_fc_id: u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: crate::isotp::IsoTpReassembler::new(expected_rx_id, tx_fc_id),
+            manager: crate::isotp_manager::IsoTpManager::new(),
         }
     }
 
     pub fn reset(&mut self) {
-        self.inner.reset();
+        self.manager.reset();
     }
 
-    pub fn is_transfer_in_progress(&self) -> bool {
-        self.inner.is_transfer_in_progress()
+    pub fn pending_sources(&self) -> Vec<u32> {
+        self.manager.pending_sources()
     }
 
-    pub fn process_frame<'py>(
-        &mut self,
-        py: Python<'py>,
-        frame: &PyCanFrame,
-    ) -> PyResult<(Option<Bound<'py, PyBytes>>, Option<PyCanFrame>)> {
-        let (data_opt, fc_opt) = self
-            .inner
-            .process_frame(&frame.inner)
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    pub fn feed(&mut self, py: Python, source: u32, data: &[u8]) -> PyResult<PyFeedResult> {
+        if data.iter().all(|&x| x == 0) {
+            return Ok(PyFeedResult {
+                completed: None,
+                flow_control_required: false,
+            });
+        }
 
-        let py_data = data_opt.map(|d| PyBytes::new(py, &d));
-        let py_fc = fc_opt.map(|f| PyCanFrame { inner: f });
-        Ok((py_data, py_fc))
+        let frame = crate::frame::CanFrame::new(source, data).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("Invalid CAN frame: {}", e))
+        })?;
+
+        match self.manager.process_frame(&frame) {
+            Ok((completed, fc_frame)) => {
+                let py_completed = match completed {
+                    Some(ref b) => Some(pyo3::types::PyBytes::new(py, b.as_slice()).into()),
+                    None => None,
+                };
+                Ok(PyFeedResult {
+                    completed: py_completed,
+                    flow_control_required: fc_frame.is_some(),
+                })
+            }
+            Err(e) => Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "ProtocolError: {}",
+                e
+            ))),
+        }
     }
 }
 
@@ -1030,6 +1062,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyNmtMaster>()?;
     m.add_class::<PyEdsFile>()?;
     m.add_class::<PyVirtualCanopenSimulator>()?;
+    m.add_class::<PyFeedResult>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_canopen_message, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;

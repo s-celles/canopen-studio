@@ -202,100 +202,27 @@ _EMPTY = FeedResult()
 class IsoTpReassembler:
     """
     Reassembles ISO-TP messages fed one frame at a time, per source identifier.
-
-    Several ECUs answer a functional request at once and their frames interleave on the
-    bus, so state is kept per source rather than globally.
-
-    Malformed input raises `ProtocolError` instead of being papered over: a dropped
-    consecutive frame would otherwise shift every byte of a VIN or a DTC list and produce
-    a plausible-looking wrong answer. The offending transfer is discarded first, so the
-    next request starts clean.
+    Backed by native Rust `canopen_core` for high-performance multi-ECU parsing.
     """
 
     def __init__(self) -> None:
-        self._transfers: Dict[int, _Transfer] = {}
+        try:
+            from .. import canopen_core
+            self._native = canopen_core.IsoTpReassembler()
+        except ImportError:
+            raise ImportError("canopen_core is required for ISO-TP reassembly")
 
     def reset(self) -> None:
-        """Forget every transfer in flight, before starting an unrelated request."""
-        self._transfers.clear()
+        self._native.reset()
+        
+    def pending_sources(self) -> list[int]:
+        return self._native.pending_sources()
 
-    def pending_sources(self) -> List[int]:
-        """Sources with a transfer still awaiting consecutive frames."""
-        return sorted(self._transfers)
+    def feed(self, source: int, data: bytes):
+        try:
+            return self._native.feed(source, data)
+        except ValueError as e:
+            if "ProtocolError" in str(e):
+                raise ProtocolError(str(e))
+            raise
 
-    def feed(self, source: int, data: bytes) -> FeedResult:
-        """
-        Feed one frame payload and report what it produced.
-
-        Args:
-            source: The identifier the frame arrived on, used to separate ECUs.
-            data: The frame payload, up to eight bytes, padding included.
-
-        Returns:
-            A `FeedResult` whose `completed` holds a finished message, if the frame
-            finished one, and whose `flow_control_required` is set when the sender is
-            waiting for a flow control frame.
-        """
-        if not data:
-            return _EMPTY
-
-        pci_type = data[0] >> 4
-        if pci_type == PCI_SINGLE_FRAME:
-            return self._feed_single_frame(source, data)
-        if pci_type == PCI_FIRST_FRAME:
-            return self._feed_first_frame(source, data)
-        if pci_type == PCI_CONSECUTIVE_FRAME:
-            return self._feed_consecutive_frame(source, data)
-        # Flow control is addressed to the sender, and types 4..15 are undefined for
-        # classic CAN. Neither is ours to act on.
-        return _EMPTY
-
-    def _feed_single_frame(self, source: int, data: bytes) -> FeedResult:
-        length = data[0] & 0x0F
-        if length == 0:
-            # An all-zero frame is idle padding, which several adapters emit between
-            # requests. Treating it as a zero-length message would invent a response.
-            return _EMPTY
-        if length > MAX_SINGLE_FRAME_PAYLOAD:
-            raise ProtocolError(f"single frame from 0x{source:X} declares {length} bytes, which cannot fit")
-        if len(data) < 1 + length:
-            raise ProtocolError(f"single frame from 0x{source:X} declares {length} bytes but carries {len(data) - 1}")
-        self._transfers.pop(source, None)
-        return FeedResult(completed=bytes(data[1 : 1 + length]))
-
-    def _feed_first_frame(self, source: int, data: bytes) -> FeedResult:
-        if len(data) < 2 + FIRST_FRAME_PAYLOAD:
-            raise ProtocolError(f"first frame from 0x{source:X} is truncated to {len(data)} bytes")
-        length = ((data[0] & 0x0F) << 8) | data[1]
-        if length <= MAX_SINGLE_FRAME_PAYLOAD:
-            raise ProtocolError(
-                f"first frame from 0x{source:X} declares {length} bytes, which belongs in a single frame"
-            )
-        self._transfers[source] = _Transfer(
-            expected_length=length,
-            buffer=bytearray(data[2 : 2 + FIRST_FRAME_PAYLOAD]),
-        )
-        return FeedResult(flow_control_required=True)
-
-    def _feed_consecutive_frame(self, source: int, data: bytes) -> FeedResult:
-        transfer = self._transfers.get(source)
-        if transfer is None:
-            # A leftover frame from a transfer that was aborted or predates this session.
-            return _EMPTY
-
-        sequence = data[0] & 0x0F
-        if sequence != transfer.next_sequence:
-            del self._transfers[source]
-            raise ProtocolError(
-                f"consecutive frame from 0x{source:X} is out of order: "
-                f"expected sequence {transfer.next_sequence}, got {sequence}"
-            )
-
-        transfer.buffer.extend(data[1:])
-        transfer.next_sequence = (transfer.next_sequence + 1) & 0x0F
-
-        if len(transfer.buffer) < transfer.expected_length:
-            return _EMPTY
-
-        del self._transfers[source]
-        return FeedResult(completed=bytes(transfer.buffer[: transfer.expected_length]))

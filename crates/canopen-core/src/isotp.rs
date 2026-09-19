@@ -124,7 +124,7 @@ impl IsoTpReassembler {
             }
             1 => {
                 // First Frame (FF)
-                if payload.len() < 2 {
+                if payload.len() < 8 {
                     return Err(IsoTpError::InvalidPci(pci_byte));
                 }
                 let total_len = (((pci_byte & 0x0F) as usize) << 8) | (payload[1] as usize);
