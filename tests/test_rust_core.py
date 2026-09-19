@@ -215,4 +215,47 @@ class TestRustPdo:
         assert readings[1]["value"] == 0x0237
 
 
+@pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
+class TestRustNmt:
+    def test_build_nmt_command(self):
+        f = canopen_core.NmtMaster.build_command("start", target_node=7)
+        assert f.id == 0x000
+        assert f.data[0] == 0x01
+        assert f.data[1] == 0x07
+
+        f_reset = canopen_core.NmtMaster.build_command("reset", target_node=0)
+        assert f_reset.id == 0x000
+        assert f_reset.data[0] == 0x81
+        assert f_reset.data[1] == 0x00
+
+    def test_nmt_heartbeat_tracking_and_timeout(self):
+        master = canopen_core.NmtMaster()
+        master.set_heartbeat_interval(node_id=12, interval_ms=100)
+
+        # Node 12 sends Heartbeat: Operational (0x05)
+        hb_frame = canopen_core.CanFrame(0x70C, b"\x05", timestamp_us=1000000)
+        change = master.process_frame(hb_frame)
+        assert change is not None
+        node_id, old_st, new_st = change
+        assert node_id == 12
+        assert "Operational" in new_st
+
+        # Check nodes list
+        nodes = master.all_nodes()
+        assert len(nodes) == 1
+        assert nodes[0]["node_id"] == 12
+        assert not nodes[0]["is_timed_out"]
+
+        # Check timeout after 120ms (not timed out yet, grace period is 150ms)
+        timed_out = master.check_timeouts(now_sec=1.12)
+        assert len(timed_out) == 0
+
+        # Check timeout after 200ms -> timed out!
+        timed_out2 = master.check_timeouts(now_sec=1.20)
+        assert timed_out2 == [12]
+        nodes_after = master.all_nodes()
+        assert nodes_after[0]["is_timed_out"]
+
+
+
 

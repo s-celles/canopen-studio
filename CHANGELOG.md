@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Process Data Object (PDO) Signal Mapping & Packing Engine**: Bit-level packing and extraction for arbitrary integer and boolean signals with scale factor, offset, and physical engineering units (`PdoMapping`, `SignalDefinition`).
   - **ISO-TP (ISO 15765-2) Multi-Frame Transport Engine**: Single Frame (SF), First Frame (FF), Consecutive Frame (CF) reassembly, and automatic Flow Control (FC) frame emission for diagnostic messages up to 4095 bytes.
   - Native CANopen service decoders (NMT, SYNC, TIME, EMCY, TPDO1..4, RPDO1..4, TSDO, RSDO, Heartbeat) and OBD-II SAE J1979 Mode 01 PID and DTC decoders.
-  - **PyO3 Python Bindings (`canopen_core`)**: Exposes the compiled Rust core directly to Python (`from canopen_studio import canopen_core`), tested via `tests/test_rust_core.py` (including `IsoTpReassembler`, `fragment_isotp`, and `PdoMapping`).
+  - **CANopen Network Management (NMT) Master & Heartbeat Consumer Engine (CiA 301)**: Command generation (`StartRemoteNode`, `StopRemoteNode`, `EnterPreOperational`, `ResetNode`, `ResetCommunication`), real-time node state tracking, and heartbeat timeout detection (`NmtMaster`, `MonitoredNode`).
+  - **PyO3 Python Bindings (`canopen_core`)**: Exposes the compiled Rust core directly to Python (`from canopen_studio import canopen_core`), tested via `tests/test_rust_core.py` (including `IsoTpReassembler`, `fragment_isotp`, `PdoMapping`, and `NmtMaster`).
 - **Rust CLI Tool (`crates/canopen-cli`)**:
   - `sniff`: Real-time decoded CANopen and OBD-II network monitoring over UDP.
   - `bench-tx`: High-speed packet generator achieving ~300,000 frames/second.

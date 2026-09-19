@@ -54,3 +54,20 @@ CANopen uses SDO for client/server peer-to-peer communication between the master
 3. Select the data length (1, 2, or 4 bytes).
 4. Click **Write (SDO Download)**.
 5. The device validates the value and returns a confirmation acknowledgment.
+
+---
+
+## Network Management (NMT) & Heartbeat Monitoring
+
+CANopen uses Network Management (COB-ID `0x000`) for commanding nodes between operational states, and Heartbeat messages (`0x700 + NodeID`) for presence and liveness verification.
+
+### Supported NMT Master Commands (CiA 301)
+- **Start Remote Node (`0x01`)**: Transitions the node into `Operational` state. PDO communication is active.
+- **Stop Remote Node (`0x02`)**: Transitions the node into `Stopped` state.
+- **Enter Pre-Operational (`0x80`)**: Enables SDO configuration while pausing PDO transmission.
+- **Reset Node (`0x81`)**: Re-initializes device application and communication parameters.
+- **Reset Communication (`0x82`)**: Re-initializes device communication stack only.
+
+### High-Performance Native NMT Engine
+When `canopen_core` is compiled, NMT master command synthesis, state machine tracking, and microsecond-level heartbeat timeout detection are handled in zero-allocation native Rust (`canopen_core.NmtMaster`).
+

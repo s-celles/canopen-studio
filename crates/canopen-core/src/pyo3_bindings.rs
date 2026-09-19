@@ -566,6 +566,86 @@ impl PyPdoMapping {
     }
 }
 
+#[cfg(feature = "python")]
+#[pyclass(name = "NmtMaster")]
+pub struct PyNmtMaster {
+    inner: crate::nmt::NmtMaster,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyNmtMaster {
+    #[new]
+    pub fn new() -> Self {
+        Self {
+            inner: crate::nmt::NmtMaster::new(),
+        }
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (command, target_node=0))]
+    pub fn build_command(command: &str, target_node: u8) -> PyResult<PyCanFrame> {
+        let cmd = match command.to_lowercase().as_str() {
+            "start" => crate::nmt::NmtCommand::StartRemoteNode,
+            "stop" => crate::nmt::NmtCommand::StopRemoteNode,
+            "preop" | "preoperational" => crate::nmt::NmtCommand::EnterPreOperational,
+            "reset" | "reset_node" => crate::nmt::NmtCommand::ResetNode,
+            "reset_comm" | "reset_communication" => crate::nmt::NmtCommand::ResetCommunication,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown NMT command: {}",
+                    other
+                )))
+            }
+        };
+        let frame = crate::nmt::NmtMaster::build_nmt_command(cmd, target_node)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(PyCanFrame { inner: frame })
+    }
+
+    pub fn set_heartbeat_interval(&mut self, node_id: u8, interval_ms: u64) {
+        self.inner
+            .set_node_heartbeat_interval(node_id, interval_ms * 1_000);
+    }
+
+    pub fn process_frame(&mut self, frame: &PyCanFrame) -> Option<(u8, String, String)> {
+        self.inner
+            .process_frame(&frame.inner)
+            .map(|(node, old, new)| (node, format!("{:?}", old), format!("{:?}", new)))
+    }
+
+    #[pyo3(signature = (now_sec=None))]
+    pub fn check_timeouts(&mut self, now_sec: Option<f64>) -> Vec<u32> {
+        let now_us = if let Some(sec) = now_sec {
+            (sec * 1_000_000.0) as u64
+        } else {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64
+        };
+        self.inner
+            .check_timeouts(now_us)
+            .into_iter()
+            .map(|id| id as u32)
+            .collect()
+    }
+
+    pub fn all_nodes<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let nodes = self.inner.all_nodes();
+        let mut results = Vec::with_capacity(nodes.len());
+        for n in nodes {
+            let d = PyDict::new(py);
+            d.set_item("node_id", n.node_id)?;
+            d.set_item("state", format!("{:?}", n.state))?;
+            d.set_item("last_seen_sec", (n.last_seen_us as f64) / 1_000_000.0)?;
+            d.set_item("is_timed_out", n.is_timed_out)?;
+            results.push(d);
+        }
+        Ok(results)
+    }
+}
+
 /// PyO3 C-Python module definition.
 #[cfg(feature = "python")]
 #[pymodule]
@@ -576,6 +656,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyUdpCanBus>()?;
     m.add_class::<PyIsoTpReassembler>()?;
     m.add_class::<PyPdoMapping>()?;
+    m.add_class::<PyNmtMaster>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
     m.add_function(wrap_pyfunction!(build_sdo_read, m)?)?;
