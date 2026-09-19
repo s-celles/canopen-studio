@@ -1,0 +1,811 @@
+# Generic SAE J1979 / ISO 15031-5 profile.
+#
+# The fallback every vehicle resolves to, and the base every other profile extends. It
+# describes only what the standard legislates, so it is correct on any OBD-II compliant
+# vehicle and never claims a manufacturer-specific meaning.
+#
+# Formulas use the byte letters of the standard's own worked examples: A is the first
+# data byte after the PID echo, B the second, and so on.
+#
+# Which of these a given car actually implements is never assumed — it is discovered at
+# runtime from the supported-PID bitmasks (PID 0x00, 0x20, 0x40 …), and this table only
+# says how to decode a PID once the car has said it has it.
+
+id: j1979_base
+name: Generic SAE J1979
+description: >-
+  The legislated OBD-II parameters, common to every compliant vehicle.
+  Used as the fallback when no more specific profile matches.
+
+pids:
+  # -- Mode 01: current data ------------------------------------------------
+  "01:00":
+    name: supported_pids_01_20
+    description: PIDs supported [01 - 20]
+    bytes: 4
+  "01:01":
+    name: monitor_status
+    description: Monitor status since diagnostic trouble codes were cleared
+    bytes: 4
+    bits:
+      "A.7": malfunction_indicator_lamp
+      "B.0": misfire_test_available
+      "B.1": fuel_system_test_available
+      "B.2": components_test_available
+      "B.4": misfire_test_incomplete
+      "B.5": fuel_system_test_incomplete
+      "B.6": components_test_incomplete
+  "01:02":
+    name: freeze_frame_dtc
+    description: Diagnostic trouble code that caused the freeze frame to be stored
+    bytes: 2
+  "01:03":
+    name: fuel_system_status
+    description: Fuel system status
+    bytes: 2
+    values:
+      0: Motor off
+      1: Open loop, engine not yet at operating temperature
+      2: Closed loop, using oxygen sensor feedback
+      4: Open loop, due to engine load or fuel cut on deceleration
+      8: Open loop, due to a system fault
+      16: Closed loop, but with a fault in the fuel system
+  "01:04":
+    name: engine_load
+    description: Calculated engine load
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:05":
+    name: coolant_temperature
+    description: Engine coolant temperature
+    bytes: 1
+    unit: "°C"
+    formula: A - 40
+    min: -40
+    max: 215
+  "01:06":
+    name: short_fuel_trim_bank_1
+    description: Short term fuel trim, bank 1
+    bytes: 1
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+    min: -100
+    max: 99.2
+  "01:07":
+    name: long_fuel_trim_bank_1
+    description: Long term fuel trim, bank 1
+    bytes: 1
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+    min: -100
+    max: 99.2
+  "01:08":
+    name: short_fuel_trim_bank_2
+    description: Short term fuel trim, bank 2
+    bytes: 1
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+    min: -100
+    max: 99.2
+  "01:09":
+    name: long_fuel_trim_bank_2
+    description: Long term fuel trim, bank 2
+    bytes: 1
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+    min: -100
+    max: 99.2
+  "01:0A":
+    name: fuel_pressure
+    description: Fuel pressure, gauge
+    bytes: 1
+    unit: kPa
+    formula: A * 3
+    min: 0
+    max: 765
+  "01:0B":
+    name: intake_manifold_pressure
+    description: Intake manifold absolute pressure
+    bytes: 1
+    unit: kPa
+    formula: A
+    min: 0
+    max: 255
+  "01:0C":
+    name: engine_speed
+    description: Engine speed
+    bytes: 2
+    unit: rpm
+    formula: (256 * A + B) / 4
+    min: 0
+    max: 16383.75
+  "01:0D":
+    name: vehicle_speed
+    description: Vehicle speed
+    bytes: 1
+    unit: km/h
+    formula: A
+    min: 0
+    max: 255
+  "01:0E":
+    name: timing_advance
+    description: Timing advance before top dead centre
+    bytes: 1
+    unit: "°"
+    formula: A / 2 - 64
+    min: -64
+    max: 63.5
+  "01:0F":
+    name: intake_air_temperature
+    description: Intake air temperature
+    bytes: 1
+    unit: "°C"
+    formula: A - 40
+    min: -40
+    max: 215
+  "01:10":
+    name: mass_air_flow
+    description: Mass air flow rate
+    bytes: 2
+    unit: g/s
+    formula: (256 * A + B) / 100
+    min: 0
+    max: 655.35
+  "01:11":
+    name: throttle_position
+    description: Throttle position
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:12":
+    name: secondary_air_status
+    description: Commanded secondary air status
+    bytes: 1
+    values:
+      1: Upstream
+      2: Downstream of the catalytic converter
+      4: From the outside atmosphere, or switched off
+      8: Pump commanded on for diagnostics
+  "01:13":
+    name: oxygen_sensors_present_2_banks
+    description: Oxygen sensors present, two banks
+    bytes: 1
+    bits:
+      "A.0": bank_1_sensor_1
+      "A.1": bank_1_sensor_2
+      "A.2": bank_1_sensor_3
+      "A.3": bank_1_sensor_4
+      "A.4": bank_2_sensor_1
+      "A.5": bank_2_sensor_2
+      "A.6": bank_2_sensor_3
+      "A.7": bank_2_sensor_4
+  "01:14":
+    name: oxygen_sensor_1_voltage
+    description: Oxygen sensor 1, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+    min: 0
+    max: 1.275
+  "01:15":
+    name: oxygen_sensor_2_voltage
+    description: Oxygen sensor 2, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+    min: 0
+    max: 1.275
+  "01:16":
+    name: oxygen_sensor_3_voltage
+    description: Oxygen sensor 3, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:17":
+    name: oxygen_sensor_4_voltage
+    description: Oxygen sensor 4, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:18":
+    name: oxygen_sensor_5_voltage
+    description: Oxygen sensor 5, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:19":
+    name: oxygen_sensor_6_voltage
+    description: Oxygen sensor 6, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:1A":
+    name: oxygen_sensor_7_voltage
+    description: Oxygen sensor 7, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:1B":
+    name: oxygen_sensor_8_voltage
+    description: Oxygen sensor 8, voltage
+    bytes: 2
+    unit: V
+    formula: A / 200
+  "01:1C":
+    name: obd_standard
+    description: OBD standard this vehicle conforms to
+    bytes: 1
+    values:
+      1: OBD-II as defined by CARB
+      2: OBD as defined by the EPA
+      3: OBD and OBD-II
+      4: OBD-I
+      5: Not OBD compliant
+      6: EOBD
+      7: EOBD and OBD-II
+      8: EOBD and OBD
+      9: EOBD, OBD and OBD-II
+      10: JOBD
+      11: JOBD and OBD-II
+      12: JOBD and EOBD
+      13: JOBD, EOBD and OBD-II
+      17: Engine Manufacturer Diagnostics
+      19: Heavy Duty On-Board Diagnostics (Europe)
+      20: Heavy Duty On-Board Diagnostics
+      21: World Wide Harmonised OBD
+      23: Heavy Duty Euro OBD Stage I without NOx control
+      24: Heavy Duty Euro OBD Stage I with NOx control
+      25: Heavy Duty Euro OBD Stage II without NOx control
+      26: Heavy Duty Euro OBD Stage II with NOx control
+      28: Brazil OBD Phase 1
+      29: Brazil OBD Phase 2
+      30: Korean OBD
+      31: India OBD I
+      32: India OBD II
+  "01:1D":
+    name: oxygen_sensors_present_4_banks
+    description: Oxygen sensors present, four banks
+    bytes: 1
+    bits:
+      "A.0": bank_1_sensor_1
+      "A.1": bank_1_sensor_2
+      "A.2": bank_2_sensor_1
+      "A.3": bank_2_sensor_2
+      "A.4": bank_3_sensor_1
+      "A.5": bank_3_sensor_2
+      "A.6": bank_4_sensor_1
+      "A.7": bank_4_sensor_2
+  "01:1E":
+    name: auxiliary_input_status
+    description: Auxiliary input status
+    bytes: 1
+    bits:
+      "A.0": power_take_off_active
+  "01:1F":
+    name: run_time_since_start
+    description: Run time since engine start
+    bytes: 2
+    unit: s
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:20":
+    name: supported_pids_21_40
+    description: PIDs supported [21 - 40]
+    bytes: 4
+  "01:21":
+    name: distance_with_mil_on
+    description: Distance travelled with the malfunction indicator lamp on
+    bytes: 2
+    unit: km
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:22":
+    name: fuel_rail_pressure_relative
+    description: Fuel rail pressure, relative to manifold vacuum
+    bytes: 2
+    unit: kPa
+    formula: (256 * A + B) * 0.079
+  "01:23":
+    name: fuel_rail_gauge_pressure
+    description: Fuel rail gauge pressure, diesel or gasoline direct injection
+    bytes: 2
+    unit: kPa
+    formula: (256 * A + B) * 10
+  "01:24":
+    name: oxygen_sensor_1_equivalence_ratio
+    description: Oxygen sensor 1, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:25":
+    name: oxygen_sensor_2_equivalence_ratio
+    description: Oxygen sensor 2, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:26":
+    name: oxygen_sensor_3_equivalence_ratio
+    description: Oxygen sensor 3, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:27":
+    name: oxygen_sensor_4_equivalence_ratio
+    description: Oxygen sensor 4, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:28":
+    name: oxygen_sensor_5_equivalence_ratio
+    description: Oxygen sensor 5, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:29":
+    name: oxygen_sensor_6_equivalence_ratio
+    description: Oxygen sensor 6, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:2A":
+    name: oxygen_sensor_7_equivalence_ratio
+    description: Oxygen sensor 7, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:2B":
+    name: oxygen_sensor_8_equivalence_ratio
+    description: Oxygen sensor 8, fuel-air equivalence ratio
+    bytes: 4
+    formula: (256 * A + B) * 2 / 65536
+  "01:2C":
+    name: commanded_egr
+    description: Commanded exhaust gas recirculation
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:2D":
+    name: egr_error
+    description: Exhaust gas recirculation error
+    bytes: 1
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+    min: -100
+    max: 99.2
+  "01:2E":
+    name: commanded_evaporative_purge
+    description: Commanded evaporative purge
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:2F":
+    name: fuel_tank_level
+    description: Fuel tank level input
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:30":
+    name: warm_ups_since_codes_cleared
+    description: Warm-ups since diagnostic trouble codes were cleared
+    bytes: 1
+    formula: A
+    min: 0
+    max: 255
+  "01:31":
+    name: distance_since_codes_cleared
+    description: Distance travelled since diagnostic trouble codes were cleared
+    bytes: 2
+    unit: km
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:32":
+    name: evaporative_system_vapour_pressure
+    description: Evaporative system vapour pressure
+    bytes: 2
+    unit: Pa
+    formula: signed(256 * A + B, 16) / 4
+  "01:33":
+    name: barometric_pressure
+    description: Absolute barometric pressure
+    bytes: 1
+    unit: kPa
+    formula: A
+    min: 0
+    max: 255
+  "01:34":
+    name: oxygen_sensor_1_current
+    description: Oxygen sensor 1, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:35":
+    name: oxygen_sensor_2_current
+    description: Oxygen sensor 2, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:36":
+    name: oxygen_sensor_3_current
+    description: Oxygen sensor 3, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:37":
+    name: oxygen_sensor_4_current
+    description: Oxygen sensor 4, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:38":
+    name: oxygen_sensor_5_current
+    description: Oxygen sensor 5, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:39":
+    name: oxygen_sensor_6_current
+    description: Oxygen sensor 6, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:3A":
+    name: oxygen_sensor_7_current
+    description: Oxygen sensor 7, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:3B":
+    name: oxygen_sensor_8_current
+    description: Oxygen sensor 8, current
+    bytes: 4
+    unit: mA
+    formula: (256 * C + D) / 256 - 128
+  "01:3C":
+    name: catalyst_temperature_bank_1_sensor_1
+    description: Catalyst temperature, bank 1 sensor 1
+    bytes: 2
+    unit: "°C"
+    formula: (256 * A + B) / 10 - 40
+    min: -40
+    max: 6513.5
+  "01:3D":
+    name: catalyst_temperature_bank_2_sensor_1
+    description: Catalyst temperature, bank 2 sensor 1
+    bytes: 2
+    unit: "°C"
+    formula: (256 * A + B) / 10 - 40
+    min: -40
+    max: 6513.5
+  "01:3E":
+    name: catalyst_temperature_bank_1_sensor_2
+    description: Catalyst temperature, bank 1 sensor 2
+    bytes: 2
+    unit: "°C"
+    formula: (256 * A + B) / 10 - 40
+    min: -40
+    max: 6513.5
+  "01:3F":
+    name: catalyst_temperature_bank_2_sensor_2
+    description: Catalyst temperature, bank 2 sensor 2
+    bytes: 2
+    unit: "°C"
+    formula: (256 * A + B) / 10 - 40
+    min: -40
+    max: 6513.5
+  "01:40":
+    name: supported_pids_41_60
+    description: PIDs supported [41 - 60]
+    bytes: 4
+  "01:41":
+    name: monitor_status_this_drive_cycle
+    description: Monitor status this drive cycle
+    bytes: 4
+  "01:42":
+    name: control_module_voltage
+    description: Control module power supply voltage
+    bytes: 2
+    unit: V
+    formula: (256 * A + B) / 1000
+    min: 0
+    max: 65.535
+  "01:43":
+    name: absolute_load
+    description: Absolute load value
+    bytes: 2
+    unit: "%"
+    formula: (256 * A + B) * 100 / 255
+    min: 0
+    max: 25700
+  "01:44":
+    name: commanded_equivalence_ratio
+    description: Commanded air-fuel equivalence ratio, lambda
+    bytes: 2
+    formula: (256 * A + B) * 2 / 65536
+    min: 0
+    max: 2
+  "01:45":
+    name: relative_throttle_position
+    description: Relative throttle position
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:46":
+    name: ambient_air_temperature
+    description: Ambient air temperature
+    bytes: 1
+    unit: "°C"
+    formula: A - 40
+    min: -40
+    max: 215
+  "01:47":
+    name: absolute_throttle_position_b
+    description: Absolute throttle position B
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:48":
+    name: absolute_throttle_position_c
+    description: Absolute throttle position C
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:49":
+    name: accelerator_pedal_position_d
+    description: Accelerator pedal position D
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:4A":
+    name: accelerator_pedal_position_e
+    description: Accelerator pedal position E
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:4B":
+    name: accelerator_pedal_position_f
+    description: Accelerator pedal position F
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:4C":
+    name: commanded_throttle_actuator
+    description: Commanded throttle actuator
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:4D":
+    name: time_run_with_mil_on
+    description: Time run with the malfunction indicator lamp on
+    bytes: 2
+    unit: min
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:4E":
+    name: time_since_codes_cleared
+    description: Time since diagnostic trouble codes were cleared
+    bytes: 2
+    unit: min
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:4F":
+    name: maximum_sensor_values
+    description: >-
+      Maximum values for the fuel-air equivalence ratio, the oxygen sensor voltage and
+      current, and the intake manifold absolute pressure
+    bytes: 4
+  "01:50":
+    name: maximum_mass_air_flow
+    description: Maximum value for the mass air flow rate
+    bytes: 4
+    unit: g/s
+    formula: A * 10
+    min: 0
+    max: 2550
+  "01:51":
+    name: fuel_type
+    description: Fuel type
+    bytes: 1
+    values:
+      0: Not available
+      1: Gasoline
+      2: Methanol
+      3: Ethanol
+      4: Diesel
+      5: Liquefied petroleum gas
+      6: Compressed natural gas
+      7: Propane
+      8: Electric
+      9: Bifuel running gasoline
+      10: Bifuel running methanol
+      11: Bifuel running ethanol
+      12: Bifuel running liquefied petroleum gas
+      13: Bifuel running compressed natural gas
+      14: Bifuel running propane
+      15: Bifuel running electricity
+      16: Bifuel running electric and combustion engine
+      17: Hybrid gasoline
+      18: Hybrid ethanol
+      19: Hybrid diesel
+      20: Hybrid electric
+      21: Hybrid running electric and combustion engine
+      22: Hybrid regenerative
+      23: Bifuel running diesel
+  "01:52":
+    name: ethanol_fuel_percentage
+    description: Ethanol fuel percentage
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:53":
+    name: absolute_evaporative_system_vapour_pressure
+    description: Absolute evaporative system vapour pressure
+    bytes: 2
+    unit: kPa
+    formula: (256 * A + B) / 200
+    min: 0
+    max: 327.675
+  "01:54":
+    name: evaporative_system_vapour_pressure_signed
+    description: Evaporative system vapour pressure, signed
+    bytes: 2
+    unit: Pa
+    formula: signed(256 * A + B, 16)
+    min: -32767
+    max: 32768
+  "01:55":
+    name: short_secondary_oxygen_trim_bank_1
+    description: Short term secondary oxygen sensor trim, bank 1
+    bytes: 2
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+  "01:56":
+    name: long_secondary_oxygen_trim_bank_1
+    description: Long term secondary oxygen sensor trim, bank 1
+    bytes: 2
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+  "01:57":
+    name: short_secondary_oxygen_trim_bank_2
+    description: Short term secondary oxygen sensor trim, bank 2
+    bytes: 2
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+  "01:58":
+    name: long_secondary_oxygen_trim_bank_2
+    description: Long term secondary oxygen sensor trim, bank 2
+    bytes: 2
+    unit: "%"
+    formula: (A - 128) * 100 / 128
+  "01:59":
+    name: fuel_rail_absolute_pressure
+    description: Fuel rail absolute pressure
+    bytes: 2
+    unit: kPa
+    formula: (256 * A + B) * 10
+    min: 0
+    max: 655350
+  "01:5A":
+    name: relative_accelerator_pedal_position
+    description: Relative accelerator pedal position
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:5B":
+    name: hybrid_battery_remaining_life
+    description: Hybrid battery pack remaining life
+    bytes: 1
+    unit: "%"
+    formula: A * 100 / 255
+    min: 0
+    max: 100
+  "01:5C":
+    name: engine_oil_temperature
+    description: Engine oil temperature
+    bytes: 1
+    unit: "°C"
+    formula: A - 40
+    min: -40
+    max: 210
+  "01:5D":
+    name: fuel_injection_timing
+    description: Fuel injection timing
+    bytes: 2
+    unit: "°"
+    formula: (256 * A + B - 26880) / 128
+    min: -210
+    max: 301.992
+  "01:5E":
+    name: engine_fuel_rate
+    description: Engine fuel rate
+    bytes: 2
+    unit: L/h
+    formula: (256 * A + B) / 20
+    min: 0
+    max: 3212.75
+  "01:5F":
+    name: emission_requirements
+    description: Emission requirements this vehicle is designed to
+    bytes: 1
+  "01:60":
+    name: supported_pids_61_80
+    description: PIDs supported [61 - 80]
+    bytes: 4
+
+  # -- Mode 09: vehicle information -----------------------------------------
+  "09:00":
+    name: supported_info_01_20
+    description: Vehicle information PIDs supported [01 - 20]
+    bytes: 4
+  "09:01":
+    name: vin_message_count
+    description: Number of messages carrying the vehicle identification number
+    bytes: 1
+    formula: A
+  "09:02":
+    name: vin
+    description: Vehicle identification number
+    ascii: true
+  "09:03":
+    name: calibration_id_message_count
+    description: Number of messages carrying the calibration identifiers
+    bytes: 1
+    formula: A
+  "09:04":
+    name: calibration_id
+    description: Calibration identifiers
+    ascii: true
+  "09:05":
+    name: calibration_verification_number_count
+    description: Number of messages carrying the calibration verification numbers
+    bytes: 1
+    formula: A
+  "09:06":
+    name: calibration_verification_number
+    description: Calibration verification numbers
+  "09:07":
+    name: in_use_performance_message_count
+    description: Number of messages carrying the in-use performance tracking data
+    bytes: 1
+    formula: A
+  "09:08":
+    name: in_use_performance_spark
+    description: In-use performance tracking, spark ignition
+  "09:09":
+    name: ecu_name_message_count
+    description: Number of messages carrying the ECU name
+    bytes: 1
+    formula: A
+  "09:0A":
+    name: ecu_name
+    description: Name of the electronic control unit
+    ascii: true
+  "09:0B":
+    name: in_use_performance_compression
+    description: In-use performance tracking, compression ignition

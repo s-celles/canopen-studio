@@ -11,5 +11,24 @@ Copyright (C) 2026 Sébastien Celles
 """
 
 from .formula import Formula, FormulaError
+from .pids import (
+    MODE_NAMES,
+    PidDefinition,
+    PidError,
+    PidTable,
+    PidValue,
+    format_key,
+    parse_key,
+)
 
-__all__ = ["Formula", "FormulaError"]
+__all__ = [
+    "MODE_NAMES",
+    "Formula",
+    "FormulaError",
+    "PidDefinition",
+    "PidError",
+    "PidTable",
+    "PidValue",
+    "format_key",
+    "parse_key",
+]
