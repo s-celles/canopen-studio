@@ -5,6 +5,99 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Rust High-Performance Core Engine (`crates/canopen-core`)** (Phase 1A):
+  - Compact stack-allocated `CanFrame` (24 bytes) supporting zero heap allocations, microsecond timestamps, and dual serialization (MessagePack `python-can` interop and raw compact binary).
+  - High-throughput `TraceRingBuffer` with snapshotting and filtering by arbitration ID/mask.
+  - Sub-microsecond `LatencyTracker` measuring periodic frame intervals and clock jitter (e.g. 50 Hz SYNC = 20,000 µs nominal) and RTT statistics.
+  - Cross-platform `UdpCanBus` with `SO_REUSEADDR`, `SO_REUSEPORT`, and `SO_BROADCAST`.
+  - CANopen Service Data Object (SDO) client & server protocol engine (CiA 301): expedited upload (read), expedited download (write), segmented block transfers, and abort code decoding.
+  - **Process Data Object (PDO) Signal Mapping & Packing Engine**: Bit-level packing and extraction for arbitrary integer and boolean signals with scale factor, offset, and physical engineering units (`PdoMapping`, `SignalDefinition`).
+  - **ISO-TP (ISO 15765-2) Multi-Frame Transport Engine**: Single Frame (SF), First Frame (FF), Consecutive Frame (CF) reassembly, and automatic Flow Control (FC) frame emission for diagnostic messages up to 4095 bytes.
+  - Native CANopen service decoders (NMT, SYNC, TIME, EMCY, TPDO1..4, RPDO1..4, TSDO, RSDO, Heartbeat) and OBD-II SAE J1979 Mode 01 PID and DTC decoders.
+  - **CANopen Network Management (NMT) Master & Heartbeat Consumer Engine (CiA 301)**: Command generation (`StartRemoteNode`, `StopRemoteNode`, `EnterPreOperational`, `ResetNode`, `ResetCommunication`), real-time node state tracking, and heartbeat timeout detection (`NmtMaster`, `MonitoredNode`).
+  - **Electronic Data Sheet (EDS) & Object Dictionary Engine (CiA 306)**: Parser for standard CANopen `.eds` files (`[FileInfo]`, `[DeviceInfo]`, objects `[1000]`, subindices `[1018sub1]`, data types, access rights, default values), with automatic `PdoMapping` generation directly from TPDO/RPDO mapping records (`0x1A00`..`0x1A03`, `0x1600`..`0x1603`).
+  - **PyO3 Python Bindings (`canopen_core`)**: Exposes the compiled Rust core directly to Python (`from canopen_studio import canopen_core`), tested via `tests/test_rust_core.py` (including `IsoTpReassembler`, `fragment_isotp`, `PdoMapping`, `NmtMaster`, and `EdsFile`).
+  - **Phase 1A Native Integration**: The Python `UdpBus` interface now natively instantiates and delegates to the compiled Rust `canopen_core.UdpCanBus` and `canopen_core.CanFrame` objects, achieving wire-speed frame parsing directly in the backend and eliminating `python-can`'s MessagePack overhead.
+  - **Phase 1B Global Parsing**: The `CanopenLayer` class in Python now natively offloads protocol classification (SDO, PDO, NMT, Heartbeat) and bitwise decoding to `canopen_core.decode_canopen_message` in Rust.
+  - **Phase 1B Virtual Simulator**: The `VirtualCanopenSimulator` math generation and background timing loops (SYNC, Heartbeat, PDO sine waves) have been entirely ported to a native Rust OS thread, eliminating the Python GIL overhead.
+  - **Phase 1C ISO-TP Engine**: The `IsoTpReassembler` used for OBD-II vehicle diagnostics is now fully rewritten in Rust. It tracks multiplexed concurrent diagnostic responses directly in native code, drastically speeding up VIN extraction and PID scanning.
+- **Rust CLI Tool (`crates/canopen-cli`)**:
+  - `sniff`: Real-time decoded CANopen and OBD-II network monitoring over UDP.
+  - `bench-tx`: High-speed packet generator achieving ~300,000 frames/second.
+  - `latency`: Real-time jitter and latency statistics display.
+  - `bench-ping`: RTT benchmark — sends N CAN ping frames (0x7E0) and measures round-trip time from echo replies (0x7E1), reporting min/avg/max/stddev and packet loss. Same protocol as the Python `LatencyTracker` baseline.
+  - `echo`: Auto-echo responder — listens for 0x7E0 frames and immediately replies with 0x7E1 echoing the identical payload. Run on the remote machine to act as the ping target.
+- **Justfile Recipes**: `rust-build`, `rust-test`, `rust-python`, `rust-bench-tx`, `rust-bench-ping`, `rust-echo`, and `rust-gui`.
+- **Full SYNC Jitter benchmark matrix** — transport × language (broadcast / unicast / multicast, local + Wi-Fi):
+  - Local loopback — Rust 737 µs, Python 648 µs (Rust-backed `UdpBus`).
+  - Wi-Fi broadcast — Rust 2,331 µs, Python (Rust-backed) 2,277 µs (vs old Python 23,920 µs with pure-Python simulator).
+  - Wi-Fi unicast — Rust 643 µs, Python 609 µs.
+  - Wi-Fi multicast (IGMP `join_multicast_v4`) — Rust 718 µs, Python 682 µs.
+  - Key finding: Python ≈ Rust for all transports (same Rust `UdpCanBus` core); broadcast 3–4× worse due to Wi-Fi DTIM buffering.
+  - `simulate`, `--filter-id`, `--group` added to `canopen-cli`; `rust-simulate`, `rust-bench-latency` added to justfile.
+  - Python benchmark scripts added: `benchmarks/python_sync_jitter.py` (Rust-backed UdpBus) and `benchmarks/pure_python_sync_jitter.py` (stdlib socket + `time.sleep`, no Rust).
+- Pure-Python loopback baseline: unicast 231 µs, multicast 302 µs, broadcast 312 µs (`time.perf_counter` receiver-side).
+- Pure-Python cross-Wi-Fi benchmark (receiver-side `time.perf_counter`, pure stdlib — no Rust):
+  - Unicast 192.168.30.31: **+224 µs avg jitter**, StdDev 830 µs — best single metric (no DTIM, receiver-side timing).
+  - Broadcast 192.168.30.255: **+438 µs avg jitter**, StdDev 3,774 µs, max 143 ms — DTIM bursts visible in extremes.
+  - Multicast 239.0.0.1: **+608 µs avg jitter**, StdDev 6,007 µs — experienced DTIM burst event; AP IGMP snooping inconsistent.
+- Pure Python sim → Python (Rust-backed) receiver cross-Wi-Fi (sender-side timestamps):
+  - Unicast: **+258 µs avg jitter**, StdDev **127 µs** — pure Python sim is more precise than Rust CLI sim (+609 µs) because it only sends SYNC (50fps, no HB/TPDO math between sleeps).
+  - Multicast: **+289 µs avg jitter**, StdDev **89 µs** — lowest StdDev of all measurements.
+  - Broadcast: **+786 µs avg jitter**, StdDev 3,392 µs — DTIM visible, but less severe than Rust CLI sim broadcast (76fps vs 50fps).
+- Rust CLI sim → Pure Python receiver broadcast cross-Wi-Fi: **+2,914 µs avg jitter**, StdDev 11,541 µs (receiver-side, DTIM visible).
+- §6.2 table reordered: Pure Python sim rows first, then Rust CLI, then Python GUI; receivers in order Pure Python → Rust CLI → Python (Rust-backed) within each simulator block.
+- `.gitignore` updated to whitelist `benchmarks/` directory.
+- **fix(cli)**: `latency` now binds to `0.0.0.0` so it can receive frames from remote simulators over the network (was hardcoded to `127.0.0.1`).
+- **Benchmarks documentation** updated with a pedagogical **Glossary of Benchmark Types** section explaining RTT, SYNC jitter, and TX throughput benchmarks.
+- **Rust RTT Ping Benchmark** (MAINPADIX NixOS ↔ MacBook, Wi-Fi 802.11, 20 pings each direction):
+  - Linux→Mac: min **5.92 ms**, avg **25.94 ms**, 0% loss (vs Python: min 24.85 ms, avg 76.42 ms — **−76% min, −66% avg**).
+  - Mac→Linux: min **6.15 ms**, avg **71.66 ms**, 0% loss (vs Python: min 18.15 ms, avg 74.32 ms — **−66% min**).
+  - Gain attributed to elimination of Python GIL overhead, `time.perf_counter()` scheduling latency, and msgpack serialization round-trips. Remaining high-end outliers are Wi-Fi 802.11 burst jitter (DTIM beacons, power-save cycles), independent of the language runtime.
+
+## [0.5.0] - 2026-09-19
+
+### Added
+- **OBD-II vehicle diagnostics (SAE J1979)**, in two independently testable parts: an adapter backend and an application layer.
+- `DiagnosticInterface`, a transport-neutral abstraction deliberately separate from the CAN adapter catalog. An ELM327 is not a transparent bridge — it runs its own protocol autodetection and ISO-TP handling and answers in ASCII hexadecimal — so it cannot honour the contract that `open_can_bus()` consumers (the CANopen layer, the trace, the plotter, the bridge) all depend on.
+- `ElmDiagnosticInterface`: ELM327 over USB, classic Bluetooth SPP (via a bound `rfcomm` or `COMx` port) and TCP. Bluetooth Low Energy is documented as unsupported, because BLE adapters expose a vendor-specific GATT service rather than a serial port.
+- `NativeCanDiagnosticInterface`: ISO 15765-2 over every adapter already in the catalog — SLCAN, PCAN, Kvaser, Vector, IXXAT, gs_usb, SocketCAN, UDP multicast and the virtual bus — with no ELM327 in the way.
+- Runtime ELM327 capability probing. Counterfeit boards commonly report a version their firmware does not live up to, so the version is read but never trusted: each capability is probed by sending the command and watching for `?`, the effective version is capped at the evidence, and the session degrades instead of failing.
+- Robust ELM327 reply parsing: framing on the `>` prompt, echo removal, `SEARCHING...` / `BUS INIT` / power-alert chatter (including when an adapter glues it to the data), and explicit handling of `NO DATA`, `CAN ERROR`, `UNABLE TO CONNECT`, `BUFFER FULL`, `STOPPED` and `?`. A status word is reported rather than raised, since `NO DATA` is the ordinary answer to an unsupported PID.
+- SAE J1979 modes 01 through 0A, supported-PID discovery from the vehicle's own bitmasks (`0x00`, `0x20`, `0x40` …) tracked per ECU, ISO 15031-6 trouble codes with the P/C/B/U prefixes, and VIN reading via mode 09 PID 02 with ISO 3779 decoding.
+- Declarative vehicle profiles with inheritance (generic J1979 → make → model and year) and a four-stage resolution cascade: VIN, supported-PID fingerprint, manual choice, then generic J1979. Resolution never fails, because a wrong-but-specific profile would decode a manufacturer PID into a plausible-looking wrong number.
+- The generic `j1979_base` profile as shipped data, covering mode 01 (`0x00`–`0x60`) and mode 09, verified by tests against the standard's own worked values.
+- Importers for Torque Pro custom-PID CSV exports and for DBC databases (via the optional `cantools` extra, `canopen-studio[dbc]`). Both skip a definition they cannot express exactly, with a reason, rather than importing one that would decode to a plausible wrong number.
+- Ten `obd_*` MCP tools on the **existing** server — one process, one port, one set of guards. Nine read; `obd_clear_dtcs` can change the vehicle and is gated (see below).
+- An **🩺 OBD-II Diagnostics** GUI tab: adapter selection, vehicle identification, supported-parameter discovery and live reading, trouble codes, and a gated clear.
+- Opt-in integration tests against Ircama's ELM327-emulator (`just test-emulator`), plus an in-repository ELM327 fake that carries the everyday suite with nothing installed.
+- `just` recipes: `test-emulator`, `emulator`, `import-torque`, `profiles`.
+
+### Security
+- Diagnostic writes are off by default and pass three independent gates: the `CANOPEN_STUDIO_DIAG_WRITE` environment flag (following the `CANOPEN_STUDIO_A2A` pattern), a per-profile `write_whitelist`, and an explicit per-call confirmation that never persists. A refused write transmits nothing.
+- The UDS write services `0x2E`, `0x31` and `0x2F` have **no request path** in this release and are refused even with every gate open. The gate exists so that adding one is a deliberate change rather than an accident.
+- Clearing trouble codes (mode 04) is implemented but gated, and the GUI states what it costs: it erases the readiness monitors, which need a full drive cycle to rebuild and without which an emissions test fails.
+- A write requested through MCP passes a **fourth** gate, `CANOPEN_STUDIO_MCP_DIAG_WRITE`, on top of the three above. It is deliberately separate from `CANOPEN_STUDIO_DIAG_WRITE`: enabling writes so that a person can clear codes from the GUI must not, by itself, hand that capability to whatever model is connected to the server. With only one of the two set, the call transmits nothing and the refusal names the missing one.
+- When agent writes are enabled, the capability is stated at the server's console on startup, in the tool's own description, in the result of every trouble-code read, and in `obd_status()`. Nobody should discover it by watching a model use it.
+- The UDS write services stay unavailable through MCP, because they stay unimplemented everywhere.
+- Decoding formulas from profiles and imported files are **interpreted, never executed**: parsed to a syntax tree, whitelisted node by node, and evaluated by walking that tree. Nothing is compiled and `eval` is never called, so a profile cannot reach the filesystem, the network or the interpreter. Profile files are read with `yaml.safe_load`, and exponents are bounded.
+
+### Documentation
+- `SECURITY.md`, with private disclosure through GitHub Security Advisories, the components whose security surface is real (the local agent servers, the diagnostic write gate, the formula interpreter, file loading, the updater), what is *not* a vulnerability but a documented property, and the physical-safety notes that matter when a bug can move something.
+- `CODE_OF_CONDUCT.md`: Contributor Covenant 3.0, with the reporting and enforcement sections filled in. Both live in `.github/`, where GitHub picks them up.
+- The documentation build now publishes `llms.txt` and `llms-full.txt` (via `mkdocs-llmstxt`), so a language model can read the documentation without scraping the rendered HTML.
+
+### Changed
+- `pyyaml` is now a dependency, for the vehicle profile format. `cantools` is an optional `[dbc]` extra rather than a base dependency, since the generic profile and every hand-written one work without it.
+- The MCP server's instructions mention the `obd_*` tools and state that they read only.
+
+### Notes
+- Only the CAN protocols of ISO 15765-4 are parsed. A session that autodetects K-line (ISO 9141-2, ISO 14230-4) or J1850 says which protocol it found and stops, rather than mis-parsing a differently framed reply.
+- `ELM327-emulator` is intentionally **not** a development dependency: it is licensed CC-BY-NC-SA-4.0, which is non-commercial and non-OSI, and adding it to the default dev group of a GPL project would impose that on everyone running the suite. It runs as a separate process, so nothing is redistributed, and the tests that need it skip with an instruction when it is absent.
+
 ## [0.4.0] - 2026-09-19
 
 ### Security

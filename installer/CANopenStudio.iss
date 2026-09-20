@@ -18,6 +18,8 @@
 AppId={{5A8F3C9E-8E2B-4A73-9C14-6F392B7D012A}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+; Without this the compiled Setup.exe reports an empty FileVersion.
+VersionInfoVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
@@ -44,6 +46,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\dist\CANopen-Studio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; PyInstaller 6 places --add-data payloads under {app}\_internal, so the icon and
+; the README that [Icons] and UninstallDisplayIcon point at are not where those
+; references expect. Install a copy at {app} so they resolve.
+Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"

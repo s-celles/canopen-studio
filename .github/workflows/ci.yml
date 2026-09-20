@@ -36,14 +36,47 @@ jobs:
       - name: Static Type Checking (mypy)
         run: uv run mypy .
 
+      # The exclusions need the ./ prefix: with `-r .` bandit sees ./.venv/...,
+      # which bare `.venv` does not match, so it was scanning every installed
+      # dependency and failing on PIL. B110 and B112 are skipped because this
+      # codebase uses try/except/pass deliberately — a bus that is already gone
+      # is not a reason to fail closing a session — and the individual B104
+      # sites carry a `# nosec` with their reason.
       - name: Security Linting (bandit)
-        run: uv run bandit -r . -x tests,.venv -s B101,B310,B404,B603,B606,B607
+        run: uv run bandit -r . -x ./tests,./.venv -s B101,B110,B112,B310,B404,B603,B606,B607
 
       - name: Dependency Vulnerability Check (safety)
         run: uv run safety check || true  # Using true to prevent failing on upstream vulns unless explicitly configured
 
       - name: Run pre-commit hooks
         run: uv run pre-commit run --all-files
+
+  rust:
+    name: Rust (clippy + fmt + test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y libfontconfig1-dev pkg-config
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting (rustfmt)
+        run: cargo fmt --check
+
+      - name: Lint (clippy)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
 
   test:
     name: Tests on Python ${{ matrix.python-version }} (${{ matrix.os }})
@@ -69,6 +102,19 @@ jobs:
 
       - name: Install dependencies
         run: uv sync
+
+      # uv sync cannot produce this: the build backend is plain setuptools and
+      # the Rust workspace sits beside it. Without the compiled canopen_core,
+      # every test that reaches ISO-TP, the CANopen layer or the virtual
+      # simulator fails on the import alone.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the canopen_core Python extension
+        run: uv run python scripts/build_extension.py
 
       - name: Run pytest test suite
         run: uv run pytest -v

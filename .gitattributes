@@ -1,0 +1,12 @@
+# Line endings that the tools actually require.
+#
+# This repo is developed on Windows, where git's core.autocrlf=true rewrites
+# checked-out files to CRLF. That silently breaks shell scripts: sh reports a
+# syntax error on `fi\r`, so `bash install.sh` and `just gui` fail with no
+# obvious cause. Pin the formats that care.
+
+*.sh   text eol=lf
+*.nix  text eol=lf
+
+*.bat  text eol=crlf
+*.ps1  text eol=crlf

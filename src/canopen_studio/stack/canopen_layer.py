@@ -44,7 +44,7 @@ class CANopenLayer:
 
     def process_can_message(self, msg: can.Message) -> CanopenMessage:
         """
-        Ingests a raw can.Message, classifies the CANopen service,
+        Ingests a raw can.Message, classifies the CANopen service natively using Rust `canopen_core`,
         tracks network states, and dispatches to application decoders.
         """
         cid = msg.arbitration_id
@@ -52,123 +52,130 @@ class CANopenLayer:
         data = bytes(msg.data)
         now = msg.timestamp if msg.timestamp else time.time()
 
-        service = CanopenService.RAW_CAN
-        node_id: Optional[int] = None
-        pdo_num: Optional[int] = None
-        info = ""
+        try:
+            from canopen_studio import canopen_core
 
-        # 1. Check for Extended 29-bit identifier (J1939 / ISO 11783)
-        if is_ext:
-            service = CanopenService.EXTENDED_J1939
-            node_id = cid & 0xFF
+            native_frame = canopen_core.CanFrame(cid, data, int(now * 1_000_000) if now else None, is_ext)
+            decoded = canopen_core.decode_canopen_message(native_frame)
+            s_type_str = decoded["service"]
+            node_id = decoded.get("node_id")
+            pdo_num = decoded.get("pdo_number")
+            info = decoded["description"]
 
-        # 2. Standard 11-bit CANopen Services (CiA 301)
-        elif cid == 0x000:
-            service = CanopenService.NMT_MASTER
-            if len(data) >= 2:
-                cmd_val, target_node = data[0], data[1]
-                node_id = target_node
-                info = f"NMT Master -> Cmd: 0x{cmd_val:02X} for Node: {target_node if target_node != 0 else 'All'}"
-            else:
-                info = "NMT Master Command"
+            # Map string to enum
+            service = CanopenService[s_type_str] if s_type_str in CanopenService.__members__ else CanopenService.RAW_CAN
 
-        elif cid == 0x080:
-            service = CanopenService.SYNC
-            info = "SYNC (Clock pulse)"
+            # Track states natively
+            if service == CanopenService.HEARTBEAT and node_id is not None:
+                state_val = decoded.get("nmt_state")
+                if state_val is not None:
+                    state = NmtState.from_byte(state_val)
+                    self.node_states[node_id] = state
+                    self.last_seen[node_id] = now
+                    for dec in self.registry.decoders:
+                        dec.on_nmt_state_change(node_id, state)
 
-        elif cid == 0x100:
-            service = CanopenService.TIME_STAMP
-            info = "TIME STAMP"
+        except ImportError:
+            # Fallback to python classification
+            service = CanopenService.RAW_CAN
+            node_id = None
+            pdo_num = None
+            info = ""
 
-        elif 0x081 <= cid <= 0x0FF:
-            service = CanopenService.EMERGENCY
-            node_id = cid - 0x080
-            err_code = (data[1] << 8) | data[0] if len(data) >= 2 else 0
-            info = f"EMCY Node {node_id} -> Code: 0x{err_code:04X}"
-
-        elif 0x700 <= cid <= 0x77F:
-            service = CanopenService.HEARTBEAT
-            node_id = cid - 0x700
-            if data:
-                state = NmtState.from_byte(data[0])
-                self.node_states[node_id] = state
-                self.last_seen[node_id] = now
-                info = f"Heartbeat Node {node_id} -> State: {state}"
-                for dec in self.registry.decoders:
-                    dec.on_nmt_state_change(node_id, state)
-            else:
-                info = f"Node Guarding Node {node_id}"
-
-        elif 0x180 <= cid <= 0x1FF:
-            service = CanopenService.TPDO
-            pdo_num = 1
-            node_id = cid - 0x180
-            info = f"TPDO1 Node {node_id}"
-
-        elif 0x200 <= cid <= 0x27F:
-            service = CanopenService.RPDO
-            pdo_num = 1
-            node_id = cid - 0x200
-            info = f"RPDO1 Node {node_id}"
-
-        elif 0x280 <= cid <= 0x2FF:
-            service = CanopenService.TPDO
-            pdo_num = 2
-            node_id = cid - 0x280
-            info = f"TPDO2 Node {node_id}"
-
-        elif 0x300 <= cid <= 0x37F:
-            service = CanopenService.RPDO
-            pdo_num = 2
-            node_id = cid - 0x300
-            info = f"RPDO2 Node {node_id}"
-
-        elif 0x380 <= cid <= 0x3FF:
-            service = CanopenService.TPDO
-            pdo_num = 3
-            node_id = cid - 0x380
-            info = f"TPDO3 Node {node_id}"
-
-        elif 0x400 <= cid <= 0x47F:
-            service = CanopenService.RPDO
-            pdo_num = 3
-            node_id = cid - 0x400
-            info = f"RPDO3 Node {node_id}"
-
-        elif 0x480 <= cid <= 0x4FF:
-            service = CanopenService.TPDO
-            pdo_num = 4
-            node_id = cid - 0x480
-            info = f"TPDO4 Node {node_id}"
-
-        elif 0x500 <= cid <= 0x57F:
-            service = CanopenService.RPDO
-            pdo_num = 4
-            node_id = cid - 0x500
-            info = f"RPDO4 Node {node_id}"
-
-        elif 0x580 <= cid <= 0x5FF:
-            service = CanopenService.SDO_TX
-            node_id = cid - 0x580
-            if len(data) >= 4:
-                idx = data[1] | (data[2] << 8)
-                sub = data[3]
-                info = f"SDO Response (Server->Client) Node {node_id} [0x{idx:04X}:{sub:02X}]"
-            else:
-                info = f"SDO Response Node {node_id}"
-
-        elif 0x600 <= cid <= 0x67F:
-            service = CanopenService.SDO_RX
-            node_id = cid - 0x600
-            if len(data) >= 4:
-                idx = data[1] | (data[2] << 8)
-                sub = data[3]
-                info = f"SDO Request (Client->Server) Node {node_id} [0x{idx:04X}:{sub:02X}]"
-            else:
-                info = f"SDO Request Node {node_id}"
+            if is_ext:
+                service = CanopenService.EXTENDED_J1939
+                node_id = cid & 0xFF
+            elif cid == 0x000:
+                service = CanopenService.NMT_MASTER
+                if len(data) >= 2:
+                    node_id = data[1]
+                    info = f"NMT Master -> Cmd: 0x{data[0]:02X} for Node: {node_id if node_id != 0 else 'All'}"
+                else:
+                    info = "NMT Master Command"
+            elif cid == 0x080:
+                service = CanopenService.SYNC
+                info = "SYNC (Clock pulse)"
+            elif cid == 0x100:
+                service = CanopenService.TIME_STAMP
+                info = "TIME STAMP"
+            elif 0x081 <= cid <= 0x0FF:
+                service = CanopenService.EMERGENCY
+                node_id = cid - 0x080
+                err_code = (data[1] << 8) | data[0] if len(data) >= 2 else 0
+                info = f"EMCY Node {node_id} -> Code: 0x{err_code:04X}"
+            elif 0x700 <= cid <= 0x77F:
+                service = CanopenService.HEARTBEAT
+                node_id = cid - 0x700
+                if data:
+                    state = NmtState.from_byte(data[0])
+                    self.node_states[node_id] = state
+                    self.last_seen[node_id] = now
+                    info = f"Heartbeat Node {node_id} -> State: {state}"
+                    for dec in self.registry.decoders:
+                        dec.on_nmt_state_change(node_id, state)
+                else:
+                    info = f"Node Guarding Node {node_id}"
+            elif 0x180 <= cid <= 0x1FF:
+                service = CanopenService.TPDO
+                pdo_num = 1
+                node_id = cid - 0x180
+                info = f"TPDO1 Node {node_id}"
+            elif 0x200 <= cid <= 0x27F:
+                service = CanopenService.RPDO
+                pdo_num = 1
+                node_id = cid - 0x200
+                info = f"RPDO1 Node {node_id}"
+            elif 0x280 <= cid <= 0x2FF:
+                service = CanopenService.TPDO
+                pdo_num = 2
+                node_id = cid - 0x280
+                info = f"TPDO2 Node {node_id}"
+            elif 0x300 <= cid <= 0x37F:
+                service = CanopenService.RPDO
+                pdo_num = 2
+                node_id = cid - 0x300
+                info = f"RPDO2 Node {node_id}"
+            elif 0x380 <= cid <= 0x3FF:
+                service = CanopenService.TPDO
+                pdo_num = 3
+                node_id = cid - 0x380
+                info = f"TPDO3 Node {node_id}"
+            elif 0x400 <= cid <= 0x47F:
+                service = CanopenService.RPDO
+                pdo_num = 3
+                node_id = cid - 0x400
+                info = f"RPDO3 Node {node_id}"
+            elif 0x480 <= cid <= 0x4FF:
+                service = CanopenService.TPDO
+                pdo_num = 4
+                node_id = cid - 0x480
+                info = f"TPDO4 Node {node_id}"
+            elif 0x500 <= cid <= 0x57F:
+                service = CanopenService.RPDO
+                pdo_num = 4
+                node_id = cid - 0x500
+                info = f"RPDO4 Node {node_id}"
+            elif 0x580 <= cid <= 0x5FF:
+                service = CanopenService.SDO_TX
+                node_id = cid - 0x580
+                if len(data) >= 4:
+                    idx = data[1] | (data[2] << 8)
+                    sub = data[3]
+                    info = f"SDO Response (Server->Client) Node {node_id} [0x{idx:04X}:{sub:02X}]"
+                else:
+                    info = f"SDO Response Node {node_id}"
+            elif 0x600 <= cid <= 0x67F:
+                service = CanopenService.SDO_RX
+                node_id = cid - 0x600
+                if len(data) >= 4:
+                    idx = data[1] | (data[2] << 8)
+                    sub = data[3]
+                    info = f"SDO Request (Client->Server) Node {node_id} [0x{idx:04X}:{sub:02X}]"
+                else:
+                    info = f"SDO Request Node {node_id}"
 
         # 3. Check for custom COB-IDs mapped by application profiles
-        elif cid in self._custom_cob_map:
+        if cid in self._custom_cob_map:
             mapping = self._custom_cob_map[cid]
             info = f"Custom: {mapping['desc']}"
             service = CanopenService.TPDO

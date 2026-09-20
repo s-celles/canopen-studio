@@ -19,6 +19,10 @@ Features:
     - Arbitrary Frame Transmitter (Standard 11-bit & Extended 29-bit, RTR, single-shot & periodic)
     - Pre-set Frame Templates Library for quick experimentation
 - Universal SDO Object Dictionary Reader & Writer (Expedited Read/Write for any Node ID)
+- OBD-II vehicle diagnostics (SAE J1979) over an ELM327 or a native CAN adapter:
+    - Supported-PID discovery, live readings, trouble codes, VIN and vehicle identification
+    - Declarative vehicle profiles with inheritance, resolved from the VIN or the PID fingerprint
+    - Read-only by default; clearing codes needs CANOPEN_STUDIO_DIAG_WRITE and a confirmation
 - Hardware & Bus Diagnostics
 - Built-in Virtual Simulator for hardware-free educational study
 - Interactive CANopen Educational Reference Guide
@@ -44,6 +48,14 @@ from tkinter import ttk, messagebox, filedialog
 
 import can
 from canopen_studio.bridge import CanBridge
+from canopen_studio.latency import LatencyTracker
+from canopen_studio.diag import DiagnosticError, DiagnosticWriteRefused, WriteGate, clear_trouble_codes
+from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
+from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
+from canopen_studio.diag.j1979.client import J1979Client
+from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource
+from canopen_studio.diag.profiles.library import ProfileLibrary
+from canopen_studio.diag.profiles.resolver import ProfileResolver
 from canopen_studio.updater import (
     CURRENT_VERSION,
     GITHUB_REPO,
@@ -69,6 +81,11 @@ from canopen_studio.interfaces import (
     open_can_bus,
     VirtualCanopenSimulator,
 )
+
+# Telemetry readouts are sized in characters so the cards keep a constant
+# width whatever the digit count of the value they show.
+_VALUE_WIDTH = 11  # fits "-99999 RPM"
+_SUB_WIDTH = 24  # fits "State: Operation Enabled"
 
 # Color palette for 8 payload bytes (Reverse engineering multi-trace)
 BYTE_COLORS = [
@@ -206,6 +223,14 @@ class CanStudioApp(tk.Tk):
         self.simulator: Optional[VirtualCanopenSimulator] = None
         self.bridge: Optional[CanBridge] = None  # mirrors the captured bus onto the network
         self.running = False
+
+        # OBD-II diagnostic session. Separate from the CAN bus on purpose: an ELM327 is
+        # not a bus at all, and a native session borrows this one without owning it.
+        self.diag_session = None
+        self.diag_client: Optional[J1979Client] = None
+        self.diag_match = None
+        self.diag_frame_source: Optional[QueueFrameSource] = None
+        self.diag_busy = False
         self.rx_thread: Optional[threading.Thread] = None
 
         # Connection actually in use — may differ from the combobox selection when
@@ -218,6 +243,9 @@ class CanStudioApp(tk.Tk):
         self.tx_periodic_timer = None
         self.sync_generator_timer = None
         self.heartbeat_generator_timer = None
+        self.periodic_ping_timer = None
+        self.latency_tracker = LatencyTracker()
+        self.auto_echo_var = tk.BooleanVar(value=True)
 
         # Statistics & Node Discovery
         self.stats = {
@@ -391,12 +419,17 @@ class CanStudioApp(tk.Tk):
         self.notebook.add(self.tab_sdo, text=" 📖 SDO Object Dictionary ")
         self._build_sdo_tab()
 
-        # Tab 6: Hardware & Bus Diagnostics
+        # Tab 6: OBD-II Vehicle Diagnostics
+        self.tab_obd = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(self.tab_obd, text=" 🩺 OBD-II Diagnostics ")
+        self._build_obd_tab()
+
+        # Tab 7: Hardware & Bus Diagnostics
         self.tab_hw = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_hw, text=" 🔧 Hardware Diagnostics ")
         self._build_hardware_tab()
 
-        # Tab 7: Educational Reference Guide
+        # Tab 8: Educational Reference Guide
         self.tab_ref = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_ref, text=" 📚 CANopen Reference ")
         self._build_reference_tab()
@@ -484,6 +517,11 @@ class CanStudioApp(tk.Tk):
         self.lbl_total_tx = ttk.Label(stat_frame, text="Total Transmitted: 0", font=("Segoe UI", 10))
         self.lbl_total_tx.pack(side=tk.LEFT, padx=15)
 
+        self.lbl_latency = ttk.Label(
+            stat_frame, text="RTT: -- ms | Jitter: --", font=("Segoe UI", 10, "bold"), foreground="#17a2b8"
+        )
+        self.lbl_latency.pack(side=tk.LEFT, padx=15)
+
         self.lbl_nodes_cnt = ttk.Label(
             stat_frame, text="Active Nodes: 0", font=("Segoe UI", 10, "bold"), foreground="green"
         )
@@ -520,33 +558,63 @@ class CanStudioApp(tk.Tk):
         # Motor / Velocity
         g1 = ttk.LabelFrame(grid, text=" Motor Speed (0x606C) ", padding=10)
         g1.grid(row=0, column=0, padx=8, pady=6, sticky="nsew")
-        self.val_speed = ttk.Label(g1, text="0 RPM", font=("Consolas", 26, "bold"), foreground="#007acc")
+        self.val_speed = ttk.Label(
+            g1,
+            text="0 RPM",
+            font=("Consolas", 26, "bold"),
+            foreground="#007acc",
+            width=_VALUE_WIDTH,
+            anchor="center",
+        )
         self.val_speed.pack(pady=4)
-        self.val_max_speed = ttk.Label(g1, text="Max: 0 RPM", font=("Segoe UI", 9))
+        self.val_max_speed = ttk.Label(g1, text="Max: 0 RPM", font=("Segoe UI", 9), width=_SUB_WIDTH, anchor="center")
         self.val_max_speed.pack()
 
         # Target Torque / Status
         g2 = ttk.LabelFrame(grid, text=" Target Torque / Status ", padding=10)
         g2.grid(row=0, column=1, padx=8, pady=6, sticky="nsew")
-        self.val_torque = ttk.Label(g2, text="0", font=("Consolas", 26, "bold"), foreground="#d9534f")
+        self.val_torque = ttk.Label(
+            g2,
+            text="0",
+            font=("Consolas", 26, "bold"),
+            foreground="#d9534f",
+            width=_VALUE_WIDTH,
+            anchor="center",
+        )
         self.val_torque.pack(pady=4)
-        self.val_status_str = ttk.Label(g2, text="State: -", font=("Segoe UI", 9))
+        self.val_status_str = ttk.Label(g2, text="State: -", font=("Segoe UI", 9), width=_SUB_WIDTH, anchor="center")
         self.val_status_str.pack()
 
         # Heatsink / Primary Temp
         g3 = ttk.LabelFrame(grid, text=" Inverter / Heatsink Temp ", padding=10)
         g3.grid(row=1, column=0, padx=8, pady=6, sticky="nsew")
-        self.val_temp1 = ttk.Label(g3, text="0 °C", font=("Consolas", 24, "bold"), foreground="#f0ad4e")
+        self.val_temp1 = ttk.Label(
+            g3,
+            text="0 °C",
+            font=("Consolas", 24, "bold"),
+            foreground="#f0ad4e",
+            width=_VALUE_WIDTH,
+            anchor="center",
+        )
         self.val_temp1.pack(pady=4)
 
         # Motor / Secondary Temp
         g4 = ttk.LabelFrame(grid, text=" Motor Temperature ", padding=10)
         g4.grid(row=1, column=1, padx=8, pady=6, sticky="nsew")
-        self.val_temp2 = ttk.Label(g4, text="0", font=("Consolas", 24, "bold"), foreground="#5cb85c")
+        self.val_temp2 = ttk.Label(
+            g4,
+            text="0",
+            font=("Consolas", 24, "bold"),
+            foreground="#5cb85c",
+            width=_VALUE_WIDTH,
+            anchor="center",
+        )
         self.val_temp2.pack(pady=4)
 
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(0, weight=1, uniform="telemetry")
+        grid.columnconfigure(1, weight=1, uniform="telemetry")
+        grid.rowconfigure(0, weight=1, uniform="telemetry")
+        grid.rowconfigure(1, weight=1, uniform="telemetry")
 
     # =========================================================================
     # TAB 2: Reverse Engineering Plotter
@@ -1169,6 +1237,495 @@ class CanStudioApp(tk.Tk):
     # =========================================================================
     # TAB 6: Hardware & Bus Diagnostics
     # =========================================================================
+    # -- OBD-II vehicle diagnostics ----------------------------------------
+    #
+    # The session is deliberately separate from the CAN bus above. An ELM327 is not a
+    # bus — it answers ASCII, having done its own ISO-TP — and a native session borrows
+    # the studio's bus without owning it, taking frames from the capture loop rather
+    # than opening a second reader that would steal them from the trace and the plotter.
+
+    def _build_obd_tab(self):
+        # Connection
+        box_link = ttk.LabelFrame(self.tab_obd, text=" Diagnostic Link ", padding=10)
+        box_link.pack(fill=tk.X)
+
+        row = ttk.Frame(box_link)
+        row.pack(fill=tk.X)
+
+        ttk.Label(row, text="Adapter:").grid(row=0, column=0, padx=4, pady=4, sticky="w")
+        self.obd_transport_combo = ttk.Combobox(
+            row,
+            values=[
+                "ELM327 — serial / Bluetooth SPP",
+                "ELM327 — Wi-Fi / TCP",
+                "Native CAN (ISO-TP over the connected bus)",
+            ],
+            state="readonly",
+            width=38,
+        )
+        self.obd_transport_combo.current(0)
+        self.obd_transport_combo.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+        self.obd_transport_combo.bind("<<ComboboxSelected>>", self._on_obd_transport_changed)
+
+        ttk.Label(row, text="Port / Host:").grid(row=0, column=2, padx=8, pady=4, sticky="w")
+        self.obd_port_entry = ttk.Entry(row, width=18)
+        self.obd_port_entry.insert(0, "/dev/ttyUSB0")
+        self.obd_port_entry.grid(row=0, column=3, padx=4, pady=4, sticky="w")
+
+        self.obd_rate_label = ttk.Label(row, text="Baud:")
+        self.obd_rate_label.grid(row=0, column=4, padx=8, pady=4, sticky="w")
+        self.obd_rate_entry = ttk.Entry(row, width=8)
+        self.obd_rate_entry.insert(0, str(DEFAULT_BAUDRATE))
+        self.obd_rate_entry.grid(row=0, column=5, padx=4, pady=4, sticky="w")
+
+        row2 = ttk.Frame(box_link)
+        row2.pack(fill=tk.X)
+
+        ttk.Label(row2, text="Protocol:").grid(row=0, column=0, padx=4, pady=4, sticky="w")
+        self.obd_protocol_combo = ttk.Combobox(
+            row2,
+            values=[
+                "0 — autodetect",
+                "6 — ISO 15765-4 CAN 11-bit, 500 kbaud",
+                "7 — ISO 15765-4 CAN 29-bit, 500 kbaud",
+                "8 — ISO 15765-4 CAN 11-bit, 250 kbaud",
+                "9 — ISO 15765-4 CAN 29-bit, 250 kbaud",
+            ],
+            state="readonly",
+            width=34,
+        )
+        self.obd_protocol_combo.current(0)
+        self.obd_protocol_combo.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+        ttk.Label(row2, text="Profile:").grid(row=0, column=2, padx=8, pady=4, sticky="w")
+        self.obd_profile_combo = ttk.Combobox(row2, state="readonly", width=30)
+        self.obd_profile_combo.grid(row=0, column=3, padx=4, pady=4, sticky="w")
+        self._refresh_obd_profiles()
+
+        self.btn_obd_connect = ttk.Button(row2, text="🔌 Connect", command=self._toggle_obd_connection)
+        self.btn_obd_connect.grid(row=0, column=4, padx=12, pady=4)
+
+        self.obd_status_lbl = ttk.Label(box_link, text="Not connected.", font=("Consolas", 10), foreground="#a0a0a0")
+        self.obd_status_lbl.pack(fill=tk.X, pady=(8, 0))
+
+        # Vehicle identity
+        box_id = ttk.LabelFrame(self.tab_obd, text=" Vehicle ", padding=10)
+        box_id.pack(fill=tk.X, pady=8)
+
+        self.obd_identity_lbl = ttk.Label(
+            box_id,
+            text="Connect to read the VIN, the ECUs and the profile the vehicle resolves to.",
+            font=("Consolas", 10),
+            justify=tk.LEFT,
+        )
+        self.obd_identity_lbl.pack(fill=tk.X, anchor="w")
+
+        # Live parameters and trouble codes, side by side
+        panes = ttk.Frame(self.tab_obd)
+        panes.pack(fill=tk.BOTH, expand=True)
+
+        box_pids = ttk.LabelFrame(panes, text=" Supported Parameters ", padding=8)
+        box_pids.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+
+        pid_buttons = ttk.Frame(box_pids)
+        pid_buttons.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(pid_buttons, text="🔍 Discover", command=self._obd_discover_pids).pack(side=tk.LEFT, padx=2)
+        ttk.Button(pid_buttons, text="📊 Read All", command=self._obd_read_all).pack(side=tk.LEFT, padx=2)
+        ttk.Button(pid_buttons, text="↻ Read Selected", command=self._obd_read_selected).pack(side=tk.LEFT, padx=2)
+
+        self.obd_pid_tree = ttk.Treeview(box_pids, columns=("pid", "name", "value", "unit"), show="headings", height=12)
+        for column, heading, width in (
+            ("pid", "PID", 70),
+            ("name", "Parameter", 230),
+            ("value", "Value", 110),
+            ("unit", "Unit", 70),
+        ):
+            self.obd_pid_tree.heading(column, text=heading)
+            self.obd_pid_tree.column(column, width=width, anchor="w")
+        self.obd_pid_tree.pack(fill=tk.BOTH, expand=True)
+
+        box_dtc = ttk.LabelFrame(panes, text=" Diagnostic Trouble Codes ", padding=8)
+        box_dtc.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(4, 0))
+
+        dtc_buttons = ttk.Frame(box_dtc)
+        dtc_buttons.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(dtc_buttons, text="📋 Read All Codes", command=self._obd_read_dtcs).pack(side=tk.LEFT, padx=2)
+        self.btn_obd_clear = ttk.Button(dtc_buttons, text="🧹 Clear Codes", command=self._obd_clear_dtcs)
+        self.btn_obd_clear.pack(side=tk.LEFT, padx=2)
+
+        self.obd_dtc_tree = ttk.Treeview(
+            box_dtc, columns=("code", "kind", "system", "description"), show="headings", height=12
+        )
+        for column, heading, width in (
+            ("code", "Code", 70),
+            ("kind", "Kind", 85),
+            ("system", "System", 95),
+            ("description", "Description", 220),
+        ):
+            self.obd_dtc_tree.heading(column, text=heading)
+            self.obd_dtc_tree.column(column, width=width, anchor="w")
+        self.obd_dtc_tree.pack(fill=tk.BOTH, expand=True)
+
+        self.obd_write_lbl = ttk.Label(box_dtc, text=self._obd_write_notice(), font=("Consolas", 9))
+        self.obd_write_lbl.pack(fill=tk.X, pady=(6, 0))
+
+    def _obd_write_notice(self) -> str:
+        """Say plainly whether clearing codes is possible, and what it would cost."""
+        if WriteGate().enabled:
+            return "Writes enabled. Clearing also erases the readiness monitors."
+        return "Read-only. Set CANOPEN_STUDIO_DIAG_WRITE=1 to allow clearing codes."
+
+    def _refresh_obd_profiles(self):
+        """Fill the profile chooser from the library, leaving automatic resolution first."""
+        try:
+            library = ProfileLibrary().load()
+            names = [f"{profile.id} — {profile.name}" for profile in library.resolved()]
+        except Exception:
+            names = []
+        self.obd_profile_combo.configure(values=["(resolve automatically)", *names])
+        self.obd_profile_combo.current(0)
+
+    def _on_obd_transport_changed(self, event=None):
+        """Relabel the fields that mean different things for each adapter."""
+        kind = self._obd_transport_kind()
+        if kind == "elm327":
+            self.obd_rate_label.configure(text="Baud:")
+            self._obd_set_entry(self.obd_port_entry, "/dev/ttyUSB0")
+            self._obd_set_entry(self.obd_rate_entry, str(DEFAULT_BAUDRATE))
+        elif kind == "elm327_tcp":
+            self.obd_rate_label.configure(text="TCP port:")
+            self._obd_set_entry(self.obd_port_entry, "192.168.0.10")
+            self._obd_set_entry(self.obd_rate_entry, str(DEFAULT_TCP_PORT))
+        else:
+            self.obd_rate_label.configure(text="(unused)")
+            self._obd_set_entry(self.obd_port_entry, "(uses the connected bus)")
+            self._obd_set_entry(self.obd_rate_entry, "")
+
+    @staticmethod
+    def _obd_set_entry(entry, value: str):
+        entry.delete(0, tk.END)
+        entry.insert(0, value)
+
+    def _obd_transport_kind(self) -> str:
+        """Which adapter the combobox is on, as the key the session builder uses."""
+        index = self.obd_transport_combo.current()
+        return ("elm327", "elm327_tcp", "native")[index if index >= 0 else 0]
+
+    def _obd_selected_profile(self) -> Optional[str]:
+        """The profile chosen by hand, or None to resolve automatically."""
+        text = self.obd_profile_combo.get()
+        if not text or text.startswith("("):
+            return None
+        return text.split(" — ", 1)[0]
+
+    def build_diagnostic_session(self, kind: str, port: str, rate: str, protocol: str):
+        """
+        Build the diagnostic session an adapter choice asks for, without opening it.
+
+        Separated from the widgets so the mapping can be tested without a display.
+
+        Returns:
+            The session and, for a native session sharing the studio's bus, the queue
+            the capture loop must feed.
+        """
+        if kind == "elm327":
+            baud = int(rate) if str(rate).strip() else DEFAULT_BAUDRATE
+            return ElmDiagnosticInterface(SerialElmTransport(port, baudrate=baud), protocol=protocol), None
+
+        if kind == "elm327_tcp":
+            tcp_port = int(rate) if str(rate).strip() else DEFAULT_TCP_PORT
+            return ElmDiagnosticInterface(TcpElmTransport(port, tcp_port), protocol=protocol), None
+
+        if kind == "native":
+            if self.bus is None:
+                raise DiagnosticError(
+                    "a native diagnostic session runs on the studio's own bus — connect one first, "
+                    "or choose an ELM327 adapter."
+                )
+            # The capture loop owns the only reader, so frames arrive through the queue.
+            source = QueueFrameSource()
+            return NativeCanDiagnosticInterface(self.bus, source=source), source
+
+        raise DiagnosticError(f"unknown adapter {kind!r}")
+
+    def _forward_to_diagnostics(self, msg) -> None:
+        """Hand a captured frame to a native diagnostic session, if one is running."""
+        source = self.diag_frame_source
+        if source is not None:
+            source.feed(msg)
+
+    def _toggle_obd_connection(self):
+        if self.diag_session is None:
+            self._obd_connect()
+        else:
+            self._obd_disconnect()
+
+    def _obd_connect(self):
+        protocol = self.obd_protocol_combo.get().split(" ", 1)[0] or "0"
+        try:
+            session, source = self.build_diagnostic_session(
+                self._obd_transport_kind(),
+                self.obd_port_entry.get().strip(),
+                self.obd_rate_entry.get().strip(),
+                protocol,
+            )
+        except (DiagnosticError, ValueError) as exc:
+            messagebox.showerror("OBD-II", str(exc))
+            return
+
+        manual = self._obd_selected_profile()
+        self._obd_set_status("Opening the link and identifying the vehicle…", "#d18f00")
+
+        def work():
+            session.open()
+            client = J1979Client(session)
+            identity = client.identify()
+            match = ProfileResolver(ProfileLibrary().load()).resolve(identity, manual=manual)
+            client.table = match.profile.table
+            client.dtc_descriptions = dict(match.profile.dtc_descriptions)
+            return session, source, client, identity, match
+
+        def done(result):
+            session, source, client, identity, match = result
+            self.diag_session = session
+            self.diag_frame_source = source
+            self.diag_client = client
+            self.diag_match = match
+            self.btn_obd_connect.configure(text="⏏ Disconnect")
+            self._obd_set_status(f"Connected — {session.description}", "#2e8b57")
+            self._obd_show_identity(identity, match)
+
+        def failed(exc):
+            try:
+                session.close()
+            except Exception:
+                # The link never came up; closing it is best-effort.
+                pass
+            self._obd_set_status(f"Connection failed: {exc}", "red")
+            messagebox.showerror("OBD-II", str(exc))
+
+        self._obd_run(work, done, failed)
+
+    def _obd_close_session(self):
+        """Close the diagnostic session, if any. Safe to call when there is none."""
+        session = self.diag_session
+        self.diag_session = None
+        self.diag_frame_source = None
+        self.diag_client = None
+        self.diag_match = None
+        if session is None:
+            return
+        try:
+            session.close()
+        except Exception:
+            # A link already gone is not a reason to fail tearing the session down.
+            pass
+
+    def _obd_disconnect(self):
+        self._obd_close_session()
+        self.btn_obd_connect.configure(text="🔌 Connect")
+        self._obd_set_status("Not connected.", "#a0a0a0")
+        self.obd_pid_tree.delete(*self.obd_pid_tree.get_children())
+        self.obd_dtc_tree.delete(*self.obd_dtc_tree.get_children())
+
+    def _obd_set_status(self, text: str, colour: str):
+        self.obd_status_lbl.configure(text=text, foreground=colour)
+
+    def _obd_show_identity(self, identity, match):
+        lines = [
+            f"VIN:      {identity.vin or 'not reported'}",
+            f"ECUs:     {', '.join(f'0x{ecu:X}' for ecu in identity.ecus) or 'none answered'}",
+            f"Standard: {identity.obd_standard or 'not reported'}",
+            f"Profile:  {match.profile.name}  ({match.stage}: {'; '.join(match.reasons)})",
+        ]
+        if identity.vin_info is not None:
+            year = identity.vin_info.model_year
+            suffix = " (inferred)" if identity.vin_info.model_year_is_ambiguous else ""
+            lines.insert(1, f"Vehicle:  {identity.vin_info.region}, model year {year}{suffix}")
+        self.obd_identity_lbl.configure(text="\n".join(lines))
+
+    def _obd_run(self, work, on_done, on_error=None):
+        """
+        Run one diagnostic exchange off the UI thread and marshal the result back.
+
+        A request blocks for as long as the vehicle takes to answer, and a PID sweep
+        takes many of them, so none of it may run on the Tk thread.
+        """
+        if self.diag_busy:
+            messagebox.showinfo("OBD-II", "A diagnostic request is already running.")
+            return
+        self.diag_busy = True
+
+        def runner():
+            try:
+                result = work()
+            except Exception as exc:
+                # Bound as a default argument: Python clears the name at the end of the
+                # except block, so a bare closure over it would fail exactly when
+                # something went wrong.
+                self.after(0, lambda error=exc: self._obd_finish(on_error, error, failed=True))
+                return
+            self.after(0, lambda payload=result: self._obd_finish(on_done, payload, failed=False))
+
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _obd_finish(self, callback, payload, failed: bool):
+        self.diag_busy = False
+        if callback is None:
+            if failed:
+                self._obd_set_status(f"Failed: {payload}", "red")
+            return
+        callback(payload)
+
+    def _obd_require_session(self) -> Optional[J1979Client]:
+        if self.diag_client is None:
+            messagebox.showinfo("OBD-II", "Connect a diagnostic adapter first.")
+            return None
+        return self.diag_client
+
+    def _obd_discover_pids(self):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        self._obd_set_status("Discovering supported parameters…", "#d18f00")
+
+        def work():
+            supported = client.supported_pids(refresh=True)
+            return [(pid, client.describes(pid)) for pid in supported]
+
+        def done(rows):
+            self.obd_pid_tree.delete(*self.obd_pid_tree.get_children())
+            for pid, definition in rows:
+                self.obd_pid_tree.insert(
+                    "",
+                    tk.END,
+                    iid=f"01:{pid:02X}",
+                    values=(
+                        f"01:{pid:02X}",
+                        definition.name if definition else "(not described by the profile)",
+                        "",
+                        definition.unit if definition else "",
+                    ),
+                )
+            self._obd_set_status(f"{len(rows)} parameter(s) supported.", "#2e8b57")
+
+        self._obd_run(work, done)
+
+    def _obd_read_all(self):
+        self._obd_read_pids([key for key in self.obd_pid_tree.get_children()])
+
+    def _obd_read_selected(self):
+        selection = list(self.obd_pid_tree.selection())
+        if not selection:
+            messagebox.showinfo("OBD-II", "Select one or more parameters first.")
+            return
+        self._obd_read_pids(selection)
+
+    def _obd_read_pids(self, keys):
+        client = self._obd_require_session()
+        if client is None or not keys:
+            return
+        self._obd_set_status(f"Reading {len(keys)} parameter(s)…", "#d18f00")
+
+        def work():
+            results = []
+            for key in keys:
+                pid = int(key.split(":")[1], 16)
+                readings = client.read_pid(pid)
+                results.append((key, readings[0] if readings else None))
+            return results
+
+        def done(results):
+            for key, reading in results:
+                if not self.obd_pid_tree.exists(key):
+                    continue
+                current = list(self.obd_pid_tree.item(key, "values"))
+                if reading is None:
+                    current[2] = "no answer"
+                elif isinstance(reading.value, float):
+                    current[2] = f"{reading.value:g}"
+                elif isinstance(reading.value, (bytes, bytearray)):
+                    current[2] = reading.value.hex(" ").upper()
+                else:
+                    current[2] = str(reading.value)
+                self.obd_pid_tree.item(key, values=current)
+            self._obd_set_status(f"Read {len(results)} parameter(s).", "#2e8b57")
+
+        self._obd_run(work, done)
+
+    def _obd_read_dtcs(self):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        self._obd_set_status("Reading trouble codes…", "#d18f00")
+
+        def work():
+            return client.read_all_dtcs()
+
+        def done(codes):
+            self.obd_dtc_tree.delete(*self.obd_dtc_tree.get_children())
+            for code in codes:
+                self.obd_dtc_tree.insert("", tk.END, values=(code.code, code.kind, code.system, code.description))
+            if codes:
+                self._obd_set_status(f"{len(codes)} trouble code(s).", "#c05000")
+            else:
+                self._obd_set_status("No trouble codes stored.", "#2e8b57")
+
+        self._obd_run(work, done)
+
+    def _obd_clear_dtcs(self):
+        """
+        Clear trouble codes, behind the write gate and a confirmation people can read.
+
+        The gate refuses unless CANOPEN_STUDIO_DIAG_WRITE is set, so the usual outcome
+        here is an explanation rather than a transmission. That is the intent: erasing
+        the readiness monitors costs a full drive cycle to rebuild, and an emissions
+        test taken before that fails.
+        """
+        client = self._obd_require_session()
+        if client is None:
+            return
+
+        gate = WriteGate(self.diag_match.profile if self.diag_match else None)
+        if not gate.enabled:
+            messagebox.showwarning(
+                "OBD-II — writes are disabled",
+                "Clearing trouble codes is off by default.\n\n"
+                "Set CANOPEN_STUDIO_DIAG_WRITE=1 before launching the studio to enable it.",
+            )
+            return
+
+        confirmed = messagebox.askyesno(
+            "OBD-II — clear trouble codes?",
+            "This erases the stored codes, the freeze frame and the readiness monitors.\n\n"
+            "The vehicle needs a full drive cycle to rebuild the monitors, and an emissions "
+            "test taken before that will fail.\n\n"
+            "Permanent codes are not affected: only the vehicle can clear those.\n\n"
+            "Clear them now?",
+        )
+        if not confirmed:
+            return
+
+        session = self.diag_session
+        self._obd_set_status("Clearing trouble codes…", "#d18f00")
+
+        def work():
+            return clear_trouble_codes(session, gate, confirm=True)
+
+        def done(acknowledged):
+            self.obd_dtc_tree.delete(*self.obd_dtc_tree.get_children())
+            names = ", ".join(f"0x{ecu:X}" for ecu in acknowledged) or "no ECU"
+            self._obd_set_status(f"Codes cleared — acknowledged by {names}.", "#2e8b57")
+
+        def failed(exc):
+            self._obd_set_status(f"Refused: {exc}", "red")
+            if isinstance(exc, DiagnosticWriteRefused):
+                messagebox.showwarning("OBD-II", str(exc))
+            else:
+                messagebox.showerror("OBD-II", str(exc))
+
+        self._obd_run(work, done, failed)
+
     def _build_hardware_tab(self):
         box_hw = ttk.LabelFrame(self.tab_hw, text=" Hardware Adapter Information & SLCAN Commands ", padding=14)
         box_hw.pack(fill=tk.BOTH, expand=True)
@@ -1177,6 +1734,61 @@ class CanStudioApp(tk.Tk):
             box_hw, text="Adapter: Not Connected", font=("Consolas", 11, "bold"), foreground="#007acc"
         )
         self.lbl_hw_info.pack(fill=tk.X, pady=6)
+
+        # Network & Bus Latency / Jitter Monitor
+        lat_box = ttk.LabelFrame(box_hw, text=" ⏱️ Bus Latency & Jitter Measurement (CAN Ping & Echo) ", padding=10)
+        lat_box.pack(fill=tk.X, pady=8)
+
+        lat_btn_row = ttk.Frame(lat_box)
+        lat_btn_row.pack(fill=tk.X, pady=4)
+
+        self.btn_ping_once = ttk.Button(lat_btn_row, text="🎯 Ping Network (0x7E0)", command=self._send_ping_once)
+        self.btn_ping_once.pack(side=tk.LEFT, padx=4)
+
+        self.btn_periodic_ping = ttk.Button(
+            lat_btn_row, text="⏱️ Start Periodic Ping (1 Hz)", command=self._toggle_periodic_ping
+        )
+        self.btn_periodic_ping.pack(side=tk.LEFT, padx=4)
+
+        self.chk_auto_echo = ttk.Checkbutton(
+            lat_btn_row,
+            text="Auto-Echo Responder (Reply 0x7E1)",
+            variable=self.auto_echo_var,
+            command=self._on_auto_echo_changed,
+        )
+        self.chk_auto_echo.pack(side=tk.LEFT, padx=12)
+
+        ttk.Button(lat_btn_row, text="Reset Stats", command=self._reset_latency_stats).pack(side=tk.RIGHT, padx=4)
+
+        # Latency Metrics Row 1: RTT & Packet Loss
+        lat_info_row1 = ttk.Frame(lat_box)
+        lat_info_row1.pack(fill=tk.X, pady=4)
+        self.lbl_rtt_stats = ttk.Label(
+            lat_info_row1,
+            text="RTT Last: -- ms  |  Avg: -- ms  |  Min/Max: -- / -- ms",
+            font=("Consolas", 10, "bold"),
+            foreground="#007acc",
+        )
+        self.lbl_rtt_stats.pack(side=tk.LEFT, padx=4)
+
+        self.lbl_loss_stats = ttk.Label(
+            lat_info_row1,
+            text="Loss: 0.0% (0 sent, 0 recv)",
+            font=("Consolas", 10),
+            foreground="#555555",
+        )
+        self.lbl_loss_stats.pack(side=tk.RIGHT, padx=4)
+
+        # Latency Metrics Row 2: Periodic SYNC Jitter
+        lat_info_row2 = ttk.Frame(lat_box)
+        lat_info_row2.pack(fill=tk.X, pady=2)
+        self.lbl_jitter_stats = ttk.Label(
+            lat_info_row2,
+            text="SYNC 0x080 (nominal 20 ms): Interval: -- ms  |  Jitter: ±-- ms (Avg: ±-- ms)",
+            font=("Consolas", 10),
+            foreground="#28a745",
+        )
+        self.lbl_jitter_stats.pack(side=tk.LEFT, padx=4)
 
         slcan_box = ttk.LabelFrame(
             box_hw, text=" LAWICEL / SLCAN ASCII Hardware Commands (for CANUSB, USBtin, CANable) ", padding=10
@@ -1231,6 +1843,52 @@ class CanStudioApp(tk.Tk):
             )
         except Exception as e:
             self.slcan_resp_lbl.configure(text=f"Command Error: {e}", foreground="red")
+
+    # =========================================================================
+    # Latency & Jitter Measurement Handlers
+    # =========================================================================
+    def _send_ping_once(self):
+        if not self.bus or not self.running:
+            messagebox.showinfo("Latency Ping", "Please connect to a bus first.")
+            return
+        seq = self.latency_tracker.send_ping(self.bus)
+        if seq is not None:
+            self.stats["total_tx"] += 1
+
+    def _toggle_periodic_ping(self):
+        if self.periodic_ping_timer:
+            self.after_cancel(self.periodic_ping_timer)
+            self.periodic_ping_timer = None
+            self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+        else:
+            if not self.bus or not self.running:
+                messagebox.showinfo("Periodic Ping", "Please connect to a bus first.")
+                return
+            self.btn_periodic_ping.configure(text="⏹️ Stop Periodic Ping")
+            self._periodic_ping_tick()
+
+    def _periodic_ping_tick(self):
+        if not self.running or not self.bus:
+            if self.periodic_ping_timer:
+                self.after_cancel(self.periodic_ping_timer)
+                self.periodic_ping_timer = None
+                self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+            return
+        self._send_ping_once()
+        self.periodic_ping_timer = self.after(1000, self._periodic_ping_tick)
+
+    def _on_auto_echo_changed(self):
+        self.latency_tracker.auto_echo = self.auto_echo_var.get()
+
+    def _reset_latency_stats(self):
+        self.latency_tracker.reset()
+        self.lbl_rtt_stats.configure(text="RTT Last: -- ms  |  Avg: -- ms  |  Min/Max: -- / -- ms")
+        self.lbl_loss_stats.configure(text="Loss: 0.0% (0 sent, 0 recv)")
+        self.lbl_jitter_stats.configure(
+            text="SYNC 0x080 (nominal 20 ms): Interval: -- ms  |  Jitter: ±-- ms (Avg: ±-- ms)"
+        )
+        if hasattr(self, "lbl_latency"):
+            self.lbl_latency.configure(text="RTT: -- ms | Jitter: --")
 
     # =========================================================================
     # TAB 7: Educational CANopen Reference
@@ -1317,7 +1975,10 @@ class CanStudioApp(tk.Tk):
             "channel": self.active_channel,
             "bitrate": self.active_bitrate,
             "simulate": self.simulator is not None,
-            "bridge": self.bridge.get_status() if self.bridge else None,
+            "bridge": self.bridge.get_status() if hasattr(self, "bridge") and self.bridge else None,
+            "latency": self.latency_tracker.get_stats()
+            if hasattr(self, "latency_tracker") and self.latency_tracker
+            else None,
             "stats": dict(self.stats),
             "message": "Connected" if connected else "Not connected — call connect() first",
         }
@@ -1476,6 +2137,17 @@ class CanStudioApp(tk.Tk):
             self.heartbeat_generator_timer = None
             self.btn_periodic_hb.configure(text="Start Heartbeat (1 Hz)")
 
+        if self.periodic_ping_timer:
+            self.after_cancel(self.periodic_ping_timer)
+            self.periodic_ping_timer = None
+            if hasattr(self, "btn_periodic_ping"):
+                self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
+
+        self.latency_tracker.reset()
+
+        # A native diagnostic session runs on this bus, so it cannot outlive it.
+        self._obd_close_session()
+
         if self.bridge:
             self.bridge.stop()
             self.bridge = None
@@ -1566,6 +2238,8 @@ class CanStudioApp(tk.Tk):
                     continue
 
                 self._forward_to_bridge(msg)
+                self._forward_to_diagnostics(msg)
+                self.latency_tracker.process_message(msg, self.bus)
 
                 now = time.time()
                 elapsed = now - start_time
@@ -1658,7 +2332,9 @@ class CanStudioApp(tk.Tk):
                     )
 
             except Exception:
-                break
+                if not self.running:
+                    break
+                time.sleep(0.01)
 
     def _update_gui_loop(self):
         if not self.running:
@@ -1678,6 +2354,29 @@ class CanStudioApp(tk.Tk):
             self.lbl_total_rx.configure(text=f"Total Received: {self.stats['total_rx']}")
             self.lbl_total_tx.configure(text=f"Total Transmitted: {self.stats['total_tx']}")
             self.lbl_nodes_cnt.configure(text=f"Active Nodes: {len(self.discovered_nodes)}")
+
+            # Update Latency & Jitter metrics
+            lat = self.latency_tracker.get_stats()
+            rtt_txt = f"{lat['rtt_last_ms']:.1f}" if lat["rtt_last_ms"] is not None else "--"
+            jitter_txt = f"±{lat['sync_jitter_last_ms']:.1f}" if lat["sync_jitter_last_ms"] is not None else "--"
+            if hasattr(self, "lbl_latency"):
+                self.lbl_latency.configure(text=f"RTT: {rtt_txt} ms | Jitter: {jitter_txt} ms")
+
+            if hasattr(self, "lbl_rtt_stats"):
+                rtt_avg = f"{lat['rtt_avg_ms']:.1f}" if lat["rtt_avg_ms"] is not None else "--"
+                rtt_min = f"{lat['rtt_min_ms']:.1f}" if lat["rtt_min_ms"] is not None else "--"
+                rtt_max = f"{lat['rtt_max_ms']:.1f}" if lat["rtt_max_ms"] is not None else "--"
+                self.lbl_rtt_stats.configure(
+                    text=f"RTT Last: {rtt_txt} ms  |  Avg: {rtt_avg} ms  |  Min/Max: {rtt_min} / {rtt_max} ms"
+                )
+                self.lbl_loss_stats.configure(
+                    text=f"Loss: {lat['loss_rate_pct']}% ({lat['pings_sent']} sent, {lat['pings_received']} recv)"
+                )
+                sync_int = f"{lat['sync_interval_last_ms']:.1f}" if lat["sync_interval_last_ms"] is not None else "--"
+                jit_avg = f"±{lat['sync_jitter_avg_ms']:.1f}" if lat["sync_jitter_avg_ms"] is not None else "--"
+                self.lbl_jitter_stats.configure(
+                    text=f"SYNC 0x080 (nominal 20 ms): Interval: {sync_int} ms  |  Jitter: {jitter_txt} ms (Avg: {jit_avg} ms)"
+                )
 
             # Update Node Treeview table
             self.node_tree.delete(*self.node_tree.get_children())

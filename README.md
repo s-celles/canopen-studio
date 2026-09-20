@@ -20,6 +20,7 @@
 - **Network Node Monitor**: Live discovery of nodes, state tracking (Operational, Pre-Op, Stopped), and visual dials.
 - **Full Transmission Console**: Generic NMT Master (Start/Stop/Reset), 50 Hz SYNC clock generator, and frame templates library.
 - **SDO Explorer**: Expedited dictionary reader & writer for node inspection.
+- **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle, never assumed; declarative vehicle profiles with inheritance; read-only by default.
 - **In-App Updater**: Automated background checks against GitHub Releases and 1-click upgrade.
 
 ---
@@ -66,12 +67,35 @@ just check
 
 ## 📚 Documentation
 
-Detailed documentation, architecture guides, decoder tutorials, and screenshots are hosted on GitHub Pages:  
+Detailed documentation, architecture guides, decoder tutorials, and screenshots are hosted on GitHub Pages:
 👉 **[https://s-celles.github.io/canopen-studio/](https://s-celles.github.io/canopen-studio/)**
+
+---
+
+## 🗺️ Roadmap & Performance Benchmarks
+
+- **[Development Roadmap](ROADMAP.md)** — Architectural evolution towards a high-performance **Rust** engine, and integration of next-generation agentic AI protocols (**AG-UI**, **A2UI**, **Agent Control Protocol - ACP**).
+- **[Performance Benchmarks](benchmarks.md)** — Empirical latency (CAN ping/pong RTT), bus jitter, and throughput measurements across Linux and macOS.
+
+---
+
+## 🤝 Community & Security
+
+- **[Code of Conduct](.github/CODE_OF_CONDUCT.md)** — Contributor Covenant 3.0.
+- **[Security Policy](.github/SECURITY.md)** — report privately through
+  [GitHub Security Advisories](https://github.com/s-celles/canopen-studio/security/advisories/new),
+  never in a public issue.
+
+> ⚠️ This software transmits on real CAN buses and can talk to vehicles. Read the safety
+> notes in the security policy before testing against anything that moves.
+
+For language models: the documentation is published as
+[`llms.txt`](https://s-celles.github.io/canopen-studio/llms.txt) and
+[`llms-full.txt`](https://s-celles.github.io/canopen-studio/llms-full.txt).
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **GNU General Public License v3.0** (`GPL-3.0-or-later`).  
+This project is licensed under the **GNU General Public License v3.0** (`GPL-3.0-or-later`).
 Copyright (C) 2026 Sébastien Celles.

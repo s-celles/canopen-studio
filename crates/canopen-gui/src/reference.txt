@@ -1,0 +1,76 @@
+====================================================================================
+              CANopen (CiA 301 & CiA 402) EDUCATIONAL QUICK REFERENCE SHEET
+====================================================================================
+
+1. PREDEFINED CONNECTION SET (Standard COB-IDs on 11-bit CAN):
+------------------------------------------------------------------------------------
+  COB-ID Range         | Service Name                 | Description
+-----------------------|------------------------------|-----------------------------
+  0x000                | NMT Master                   | Network management (broadcast / node)
+  0x080                | SYNC                         | Bus synchronization clock
+  0x081 - 0x0FF        | EMCY (Emergency)             | 0x080 + NodeID (Error report)
+  0x100                | TIME STAMP                   | High-resolution time distribution
+  0x181 - 0x1FF        | TPDO 1 (Transmit PDO)        | 0x180 + NodeID (Device -> Bus)
+  0x201 - 0x27F        | RPDO 1 (Receive PDO)         | 0x200 + NodeID (Bus -> Device)
+  0x281 - 0x2FF        | TPDO 2                       | 0x280 + NodeID
+  0x301 - 0x37F        | RPDO 2                       | 0x300 + NodeID
+  0x381 - 0x3FF        | TPDO 3                       | 0x380 + NodeID
+  0x401 - 0x47F        | RPDO 3                       | 0x400 + NodeID
+  0x481 - 0x4FF        | TPDO 4                       | 0x480 + NodeID
+  0x501 - 0x57F        | RPDO 4                       | 0x500 + NodeID
+  0x581 - 0x5FF        | SDO Tx (Server -> Client)    | 0x580 + NodeID (Dictionary reply)
+  0x601 - 0x67F        | SDO Rx (Client -> Server)    | 0x600 + NodeID (Dictionary request)
+  0x701 - 0x77F        | Heartbeat / Bootup           | 0x700 + NodeID (State: 05=Op, 7F=PreOp)
+
+2. NMT STATE MACHINE (COB-ID 0x000 [Command, NodeID]):
+------------------------------------------------------------------------------------
+  Command 0x01 : Start Remote Node -> Operational (PDO transmission active)
+  Command 0x80 : Enter Pre-Operational -> Only SDOs and Heartbeats allowed
+  Command 0x02 : Stop Remote Node -> Stopped (Only NMT and Heartbeats allowed)
+  Command 0x81 : Reset Node -> Software power cycle
+  Command 0x82 : Reset Communication -> Reset CAN communication parameters
+
+  NodeID 0 in an NMT command addresses every node on the bus.
+
+3. SDO EXPEDITED PROTOCOL (COB-ID 0x600+Node -> 0x580+Node):
+------------------------------------------------------------------------------------
+  Upload Request (Read)   : [0x40, Index_L, Index_H, SubIndex, 00, 00, 00, 00]
+  Upload Response (Data)  : [0x43/0x4B/0x4F, Index_L, Index_H, SubIndex, D0, D1, D2, D3]
+  Download Request (Write): [0x23/0x2B/0x2F, Index_L, Index_H, SubIndex, D0, D1, D2, D3]
+  Abort Response (Error)  : [0x80, Index_L, Index_H, SubIndex, Err0, Err1, Err2, Err3]
+
+  The command specifier encodes the payload size: 0x43 = 4 bytes, 0x4B = 2, 0x4F = 1.
+
+4. STANDARD OBJECT DICTIONARY INDICES (CiA 301 & 402):
+------------------------------------------------------------------------------------
+  0x1000 : Device Type (Standard profile definition, e.g. CiA 402 drive = 0x00020192)
+  0x1001 : Error Register (0 = No error)
+  0x1008 : Manufacturer Device Name (ASCII string)
+  0x1018 : Identity Object (Vendor ID, Product Code, Revision, Serial Number)
+  0x6040 : Controlword (Command word for CiA 402 state transitions)
+  0x6041 : Statusword (Current drive state: Ready, Switched On, Operation Enabled)
+  0x6060 : Modes of Operation (1=Profile Position, 3=Profile Velocity, 4=Profile Torque)
+  0x606C : Velocity Actual Value (Signed 32-bit motor speed in RPM / internal units)
+  0x6071 : Target Torque (Signed 16-bit torque request)
+
+5. CiA 402 DRIVE STATE MACHINE (decoded from Statusword 0x6041):
+------------------------------------------------------------------------------------
+  Only bits 0..3, 5 and 6 select the state; the rest carry voltage and warning flags.
+
+  Masked value | State
+  -------------|-------------------------------------------------------------
+  0x00 (&0x4F) | Not Ready to Switch On
+  0x40 (&0x4F) | Switch On Disabled
+  0x21 (&0x6F) | Ready to Switch On
+  0x23 (&0x6F) | Switched On
+  0x27 (&0x6F) | Operation Enabled
+  0x07 (&0x6F) | Quick Stop Active
+  0x0F (&0x4F) | Fault Reaction Active
+  0x08 (&0x4F) | Fault
+
+6. VENDOR REMAPS ARE NOT THE PREDEFINED SET:
+------------------------------------------------------------------------------------
+  A device may map its PDOs onto any COB-ID. The SEVCON Gen4 used by this studio
+  calls 0x473 "TPDO5", although 0x473 is RPDO3 of node 115 in the predefined set
+  above. Read vendor COB-IDs against the device's EDS, not against the standard
+  layout.

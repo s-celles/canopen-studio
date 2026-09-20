@@ -9,17 +9,36 @@
 
 # 2. Whitelist project configuration and metadata
 !/.gitignore
+!/.gitattributes
+!/AGENTS.md
+
+# Agent skills: portable Markdown any tool can read, plus the Claude Code
+# registry wiring that makes the repo installable as a plugin.
+!/skills/
+!/skills/**
+!/.claude-plugin/
+!/.claude-plugin/**
 !/LICENSE
 !/README.md
+!/ROADMAP.md
+!/benchmarks.md
 !/pyproject.toml
 !/justfile
 !/mkdocs.yml
+!/shell.nix
+!/Cargo.toml
+!/Cargo.lock
 
 # 3. Whitelist the Python package (src layout): application modules and protocol stack
 !/src/
 !/src/**
 # ...but never the build metadata setuptools drops next to it
 /src/*.egg-info/
+
+# 4. Whitelist Rust workspace and crates
+!/crates/
+!/crates/**
+target/
 
 # 5. Whitelist documentation assets and screenshots
 !/docs/
@@ -28,6 +47,16 @@
 # 6. Whitelist unit tests
 !/tests/
 !/tests/**
+
+# 6b. Whitelist benchmark scripts
+!/benchmarks/
+!/benchmarks/**
+
+# 6c. Whitelist marimo notebooks: plain .py files that diff and version like
+# code. `canopen-studio.py` is the notebook variant of the application, packed
+# and published as such; the others are scratch exploration.
+!/notebooks/
+!/notebooks/**
 
 # 7. Whitelist packaging, scripts, icons, installer and metadata
 !/CHANGELOG.md
@@ -61,4 +90,8 @@ build/
 dist/
 site/
 uv.lock
-
+target/
+**/*.so
+**/*.dylib
+**/*.dll
+**/*.pyd

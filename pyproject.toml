@@ -18,7 +18,13 @@ dependencies = [
     "fastmcp>=2.0",
     "a2a-sdk>=0.2",
     "fastapi[standard]>=0.115",
+    "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+# Importing manufacturer signal definitions from a DBC database. Optional because the
+# generic J1979 profile, and every profile written by hand, works without it.
+dbc = ["cantools>=39.0"]
 
 [dependency-groups]
 dev = [
@@ -28,11 +34,18 @@ dev = [
     "bandit>=1.7.9",
     "safety>=3.2.7",
     "pre-commit>=3.8.0",
+    # Exercises the optional DBC importer in CI; the package itself does not need it.
+    "cantools>=39.0",
 ]
 
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+
+[tool.ruff.format]
+# marimo rewrites a notebook with its own formatting every time it is saved,
+# so the formatter would fight it line by line. Linting still applies.
+exclude = ["notebooks/**"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W"]
@@ -51,10 +64,31 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-packages = ["canopen_studio", "canopen_studio.stack", "canopen_studio.stack.decoders"]
+packages = [
+    "canopen_studio",
+    "canopen_studio.stack",
+    "canopen_studio.stack.decoders",
+    "canopen_studio.diag",
+    "canopen_studio.diag.elm327",
+    "canopen_studio.diag.j1979",
+    "canopen_studio.diag.profiles",
+    "canopen_studio.diag.profiles.importers",
+]
+
+[tool.setuptools.package-data]
+# Declarative PID tables and vehicle profiles ship with the package.
+"canopen_studio.diag.profiles" = ["data/*.yaml", "data/**/*.yaml"]
 
 [tool.setuptools.dynamic]
 version = { attr = "canopen_studio.__version__" }
+
+[tool.pytest.ini_options]
+markers = [
+    # Integration tests against Ircama's ELM327-emulator. Skipped unless it is installed,
+    # which is opt-in because of its CC-BY-NC-SA-4.0 licence:
+    #   uv run --with ELM327-emulator pytest -m emulator
+    "emulator: needs Ircama's ELM327-emulator, which is not a dev dependency",
+]
 
 [tool.mypy]
 ignore_missing_imports = true

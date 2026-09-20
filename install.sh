@@ -14,6 +14,6 @@ elif [ "$(expr substr $(uname -s) 1 5)" == "Linux" ]; then
     bash "$(dirname "$0")/scripts/install_linux.sh"
 else
     echo "Unsupported OS for automated installer: $(uname)"
-    echo "You can still run the app using 'uv run can_gui.py'."
+    echo "You can still run the app using 'uv run canopen-studio'."
     exit 1
 fi
