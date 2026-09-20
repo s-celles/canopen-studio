@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 import can
@@ -22,6 +23,7 @@ import uvicorn
 from fastmcp import FastMCP
 
 from canopen_studio import agent_security as _sec
+from canopen_studio.diag import mcp_tools as _diag_tools
 from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
 from canopen_studio.stack import CANopenLayer, get_default_registry
 
@@ -43,9 +45,27 @@ mcp = FastMCP(
     "CANopen Studio",
     instructions=(
         "Tools to connect to a CAN bus, send and receive CAN/CANopen frames, "
-        "and inspect network state. Call get_status() first to check connection."
+        "and inspect network state. Call get_status() first to check connection. "
+        "The obd_* tools drive a vehicle OBD-II session over an ELM327 or a native "
+        "CAN adapter; call obd_connect() first. They read, with one exception: "
+        "obd_clear_dtcs() changes the vehicle and is disabled unless the operator "
+        "enabled it explicitly. Never call it on your own initiative — clearing codes "
+        "also erases the readiness monitors, which costs the owner a full drive cycle "
+        "and fails an emissions test taken before then. Ask the person first."
     ),
 )
+
+# OBD-II diagnostics extend this server rather than standing up a second one: one
+# process, one port, one set of guards. All but one of these tools read; the one that
+# can change a vehicle is gated by canopen_studio.diag.security and off unless the
+# operator set CANOPEN_STUDIO_MCP_DIAG_WRITE as well as CANOPEN_STUDIO_DIAG_WRITE.
+DIAGNOSTIC_TOOLS = _diag_tools.register(mcp)
+
+
+def diagnostic_write_notice() -> str | None:
+    """The warning to print when an agent on this server can write to a vehicle."""
+    return _diag_tools.startup_notice()
+
 
 # ---------------------------------------------------------------------------
 # Shared state — used when running standalone (no GUI).
@@ -66,6 +86,9 @@ def set_app(app: Any) -> None:
     """Called by canopen_studio.gui to register the GUI app as the state provider."""
     global _app_ref
     _app_ref = app
+    # A native diagnostic session must borrow the bus the capture loop already owns,
+    # rather than opening a second reader on the same adapter.
+    _diag_tools.set_app(app)
 
 
 def _is_connected() -> bool:
@@ -148,6 +171,49 @@ def get_status() -> dict:
         "mode": "standalone",
         "stats": {"total_tx": _standalone_tx_count},
         "message": "Connected (standalone MCP server)" if connected else "Not connected — call connect() first",
+    }
+
+
+@mcp.tool()
+def get_latency_stats() -> dict:
+    """Return the current CAN bus latency (RTT min/avg/max) and SYNC jitter statistics."""
+    if _app_ref is not None:
+        return _app_ref.latency_tracker.get_stats()
+    return {"error": "Latency tracker is only available in integrated GUI mode"}
+
+
+@mcp.tool()
+def ping_bus(timeout: float = 1.0) -> dict:
+    """Send a CAN ping request frame (0x7E0) on the bus and measure Round-Trip Time (RTT).
+
+    Args:
+        timeout: Maximum seconds to wait for an echo response (0x7E1).
+    """
+    if _app_ref is None or not _app_ref.bus or not _app_ref.running:
+        return {"error": "Not connected — connect to a bus first"}
+
+    seq = _app_ref.latency_tracker.send_ping(_app_ref.bus)
+    if seq is None:
+        err = getattr(_app_ref.latency_tracker, "last_error", "Failed to transmit ping frame")
+        return {"error": f"Failed to transmit ping frame: {err}"}
+    _app_ref.stats["total_tx"] += 1
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if seq not in _app_ref.latency_tracker._pending_pings:
+            return {
+                "success": True,
+                "sequence": seq,
+                "rtt_ms": _app_ref.latency_tracker.rtt_last_ms,
+                "stats": _app_ref.latency_tracker.get_stats(),
+            }
+        time.sleep(0.01)
+
+    return {
+        "success": False,
+        "sequence": seq,
+        "error": f"Timeout ({timeout}s) waiting for ping reply from bus",
+        "stats": _app_ref.latency_tracker.get_stats(),
     }
 
 
@@ -259,7 +325,8 @@ def send_frame(can_id: int, data: list[int], extended: bool = False) -> str:
         _count_tx()
         return f"Sent 0x{can_id:03X} [{' '.join(f'{b:02X}' for b in data)}]"
     except Exception as exc:
-        return f"Send failed: {exc}"
+        cause = getattr(exc, "__cause__", None)
+        return f"Send failed: {exc} (cause: {cause!r})"
 
 
 @mcp.tool()
@@ -389,6 +456,11 @@ def build_app():
 
 def start_in_thread(host: str = MCP_HOST, port: int = MCP_PORT) -> threading.Thread:
     """Start the MCP SSE server in a daemon thread (used by canopen_studio.gui)."""
+    notice = diagnostic_write_notice()
+    if notice:
+        # Announced at startup rather than on the first call, so that nobody discovers
+        # the capability by watching a model use it.
+        print(notice)
 
     def _run() -> None:
         loop = asyncio.new_event_loop()
@@ -404,6 +476,9 @@ def main() -> None:
     """Standalone entry point: uv run canopen-mcp"""
     print(f"CANopen Studio MCP server starting on http://{MCP_HOST}:{MCP_PORT}")
     print(f"Claude Code: claude mcp add --transport sse canopen-studio http://{MCP_HOST}:{MCP_PORT}/sse")
+    notice = diagnostic_write_notice()
+    if notice:
+        print(notice)
     uvicorn.run(build_app(), host=MCP_HOST, port=MCP_PORT)
 
 

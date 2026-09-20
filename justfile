@@ -1,5 +1,17 @@
 # Justfile for Universal CAN & CANopen Studio (Analyzer & Transmit Station)
 
+# Windows has no POSIX shell on PATH, and `just` needs one even for plain
+# recipes, so point it at the bash that ships with Git for Windows.
+#
+# It must be bin/bash.exe, not usr/bin/sh.exe: only the former sets up the
+# MSYS PATH. Under sh.exe the coreutils are missing entirely and `find`
+# resolves to Windows' own find.exe, which would break the NixOS probe in
+# scripts/launch_gui.sh in a way that is hard to spot.
+#
+# No recipe uses a `#!` shebang either: `#!/usr/bin/env ...` cannot work on
+# Windows, where `env` does not exist.
+set windows-shell := ["C:/Program Files/Git/bin/bash.exe", "-cu"]
+
 
 # List all available recipes
 default:
@@ -32,13 +44,7 @@ check:
 
 # Launch full graphical studio (Network Monitor, Reverse Plotter, Trace, Transmit, SDO Explorer)
 gui:
-    #!/usr/bin/env bash
-    # NixOS: binary wheels (numpy, matplotlib) require libstdc++.so.6 from gcc-lib
-    if command -v nix-store &>/dev/null; then
-        STDCXX=$(find /nix/store -maxdepth 3 -name "libstdc++.so.6" -path "*/gcc-*-lib/lib/*" 2>/dev/null | head -1 | xargs -r dirname)
-        [ -n "$STDCXX" ] && export LD_LIBRARY_PATH="${STDCXX}:${LD_LIBRARY_PATH:-}"
-    fi
-    uv run canopen-studio
+    sh scripts/launch_gui.sh
 
 # Run sniffer on hardware (default: SLCAN at 500 kbps)
 sniff interface="slcan" bitrate="500000":
@@ -80,35 +86,43 @@ listen-only:
 sample count="20":
     uv run can-sniffer -c {{count}}
 
-# Build static documentation site with MkDocs Material
+# Run the OBD-II integration tests against Ircama's ELM327 emulator (installed on demand)
+test-emulator:
+    uv run --with ELM327-emulator pytest -m emulator -v
+
+# Start Ircama's ELM327 emulator on TCP port 35000 for manual testing (Ctrl-C to stop)
+emulator scenario="car" port="35000":
+    uv run --with ELM327-emulator python -m elm -n {{port}} -s {{scenario}}
+
+# Import a Torque Pro custom-PID CSV into a vehicle profile (e.g. just import-torque pids.csv my_car)
+import-torque file profile_id:
+    uv run python -c "from canopen_studio.diag.profiles.importers import import_torque_csv; import sys, yaml; r = import_torque_csv('{{file}}', '{{profile_id}}'); print(r); [print(' skipped:', s) for s in r.skipped]"
+
+# List the vehicle profiles available to the OBD-II diagnostics
+profiles:
+    uv run python -c "from canopen_studio.diag.profiles import ProfileLibrary; lib = ProfileLibrary().load(); [print(f'{p.id:24} {p.name}  ({len(p.table)} PIDs)') for p in lib.resolved()]; [print('ERROR:', e) for e in lib.errors]"
+
+# Build static documentation site with MkDocs Material (also emits llms.txt and llms-full.txt)
 doc-build:
-    uv run --with mkdocs-material mkdocs build --strict
+    uv run --with mkdocs-material --with mkdocs-llmstxt mkdocs build --strict
 
 # Serve live documentation locally
 doc-serve:
-    uv run --with mkdocs-material mkdocs serve
+    uv run --with mkdocs-material --with mkdocs-llmstxt mkdocs serve
+
+# Open a marimo notebook for interactive bus exploration (created on first run)
+# marimo stores notebooks as plain .py, so they diff and version like code.
+notebook file="notebooks/explore.py":
+    mkdir -p "$(dirname "{{file}}")"
+    uv run --with marimo marimo edit "{{file}}"
 
 # Clean temporary files, caches, build artifacts, and documentation site
 clean:
-    #!/usr/bin/env python3
-    import shutil, glob, os
-    for p in ["build", "dist", "site"] + glob.glob("*.csv"):
-        if os.path.exists(p):
-            if os.path.isdir(p): shutil.rmtree(p)
-            else: os.remove(p)
-    for root, dirs, files in os.walk("."):
-        for d in dirs:
-            if d in ("__pycache__", ".pytest_cache"):
-                shutil.rmtree(os.path.join(root, d), ignore_errors=True)
+    uv run python scripts/clean.py
 
 # Run OS-specific installer (sets up environment and creates application shortcuts)
 install:
-    #!/usr/bin/env python3
-    import os, subprocess
-    if os.name == "nt":
-        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/install_windows.ps1"])
-    else:
-        subprocess.run(["bash", "install.sh"])
+    uv run python scripts/install.py
 
 
 # Generate application icon assets (.ico and .png)
@@ -122,3 +136,39 @@ build-exe:
 # Build single-file portable Windows executable (.exe)
 build-portable:
     uv run --with pyinstaller python scripts/build_exe.py --clean --onefile
+
+# Build Rust crates (canopen-core and canopen-cli)
+rust-build:
+    cargo build --workspace
+
+# Run Rust unit tests
+rust-test:
+    cargo test --workspace
+
+# Build and link Rust extension into Python package
+rust-python:
+    uv run python scripts/build_extension.py
+
+# Build and run the Rust/Slint GUI (requires nix-shell for fontconfig)
+rust-gui:
+    cargo run --release -p canopen-gui
+
+# Run high-speed Rust transmitter benchmark
+rust-bench-tx count="200000":
+    cargo run --release --bin canopen-cli -- bench-tx --count {{count}} --compact
+
+# Ping benchmark: send N pings to target and measure RTT (default: 10 pings to localhost)
+rust-bench-ping target="127.0.0.1" target-port="1750" count="10" interval="1000":
+    cargo run --release --bin canopen-cli -- bench-ping --target {{target}} --target-port {{target-port}} --count {{count}} --interval-ms {{interval}}
+
+# Echo responder: reply to 0x7E0 ping frames with 0x7E1 (run on remote machine)
+rust-echo target="127.0.0.1" target-port="1750":
+    cargo run --release --bin canopen-cli -- echo --target {{target}} --target-port {{target-port}}
+
+# Run headless Rust virtual simulator (SYNC 50 Hz, Heartbeat 1 Hz, TPDOs 25 Hz)
+rust-simulate port="1750" duration="0":
+    cargo run --release --bin canopen-cli -- simulate --port {{port}} --duration-secs {{duration}}
+
+# Measure SYNC jitter of the Rust simulator (run rust-simulate in another terminal first)
+rust-bench-latency port="1750" filter="0x080" nominal="20000":
+    cargo run --release --bin canopen-cli -- latency --port {{port}} --filter-id {{filter}} --nominal-us {{nominal}}

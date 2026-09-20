@@ -6,6 +6,21 @@ pkgs.mkShell {
     (pkgs.python313.withPackages (ps: [ ps.tkinter ]))
     # Fast Python dependency manager
     pkgs.uv
+    # Rust toolchain & build tools for high-performance canopen-core
+    pkgs.cargo
+    pkgs.rustc
+    pkgs.rustfmt
+    pkgs.clippy
+    pkgs.maturin
+    pkgs.pkg-config
+    pkgs.just
+    # Required by canopen-gui (Slint) at build time
+    pkgs.fontconfig
+    # Required by Slint/winit at runtime: Wayland + input + GPU
+    pkgs.wayland
+    pkgs.libxkbcommon
+    pkgs.mesa
+    pkgs.libGL
     # Required for python-can / hardware interfaces on Linux
     pkgs.linuxHeaders
     # Provides libstdc++.so.6 needed by binary wheels (numpy, matplotlib, etc.)
@@ -18,7 +33,8 @@ pkgs.mkShell {
     export UV_PYTHON_PREFERENCE=system
 
     # Allow binary wheels (numpy, matplotlib) to find libstdc++.so.6
-    export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH"
+    # Allow Slint/winit to find Wayland, libxkbcommon, libGL at runtime
+    export LD_LIBRARY_PATH="${pkgs.stdenv.cc.cc.lib}/lib:${pkgs.wayland}/lib:${pkgs.libxkbcommon}/lib:${pkgs.mesa}/lib:${pkgs.libGL}/lib:$LD_LIBRARY_PATH"
 
     # Expose _tkinter to the uv venv: on NixOS it lives in site-packages (ps.tkinter),
     # not lib-dynload, so the venv needs --system-site-packages to pick it up.

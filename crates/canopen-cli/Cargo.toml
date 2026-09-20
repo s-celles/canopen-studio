@@ -1,0 +1,16 @@
+[package]
+name = "canopen-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-performance CLI sniffer, latency monitor, and benchmark tool"
+
+[[bin]]
+name = "canopen-cli"
+path = "src/main.rs"
+
+[dependencies]
+canopen-core = { path = "../canopen-core" }
+clap = { workspace = true }

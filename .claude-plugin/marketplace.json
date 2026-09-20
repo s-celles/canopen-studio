@@ -1,0 +1,26 @@
+{
+  "name": "canopen-studio",
+  "owner": {
+    "name": "s-celles",
+    "url": "https://github.com/s-celles/canopen-studio"
+  },
+  "metadata": {
+    "description": "Agent skills for CAN & CANopen Studio, the CAN bus analyser and transmit station.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "canopen-studio",
+      "source": "./",
+      "description": "Skills for developing CAN & CANopen Studio: the Rust canopen-core engine, the Python Tkinter studio, the Slint front end and the CLI.",
+      "version": "0.1.0",
+      "category": "development",
+      "keywords": [
+        "can",
+        "canopen",
+        "rust",
+        "python"
+      ]
+    }
+  ]
+}

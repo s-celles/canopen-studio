@@ -96,4 +96,3 @@ CAN & CANopen Studio includes a built-in update mechanism:
 - **1-Click Upgrade**:
   - For Windows Installer users: Downloads the setup executable directly and executes it to update the existing installation.
   - For Source / Git users: Offers a **Update via Git & uv** button that executes `git pull` and `uv sync` automatically.
-

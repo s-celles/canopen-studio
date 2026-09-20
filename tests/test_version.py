@@ -3,7 +3,6 @@ The project version must be declared once and read from that single place everyw
 """
 
 import re
-import tomllib
 from pathlib import Path
 
 import canopen_studio
@@ -16,12 +15,26 @@ def test_version_is_a_semantic_version():
     assert re.fullmatch(r"\d+\.\d+\.\d+", canopen_studio.__version__)
 
 
+def _project_table() -> str:
+    """The body of pyproject's `[project]` table.
+
+    Read by hand rather than with tomllib, which is stdlib only from 3.11
+    while this project supports 3.10.
+    """
+    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    table = re.search(r"^\[project\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    assert table, "pyproject.toml has no [project] table"
+    return table.group(1)
+
+
 def test_packaging_metadata_reads_the_package_version():
     """pyproject must derive the version instead of repeating it."""
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    project = _project_table()
 
-    assert "version" in pyproject["project"].get("dynamic", [])
-    assert "version" not in pyproject["project"]
+    assert re.search(r'^\s*dynamic\s*=\s*\[[^\]]*"version"', project, re.M), (
+        "[project] should declare version as dynamic"
+    )
+    assert not re.search(r"^\s*version\s*=", project, re.M), "[project] should not carry a literal version"
 
 
 def test_updater_reports_the_package_version():

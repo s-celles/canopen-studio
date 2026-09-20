@@ -28,8 +28,41 @@ theme:
     - search.highlight
     - content.code.copy
 
+plugins:
+  # Defining this section replaces MkDocs' default, so search has to be listed again.
+  - search
+  # Publishes /llms.txt (an index) and /llms-full.txt (every page, concatenated) so that
+  # a language model can read this documentation without scraping the rendered HTML.
+  - llmstxt:
+      markdown_description: >-
+        Universal CAN and CANopen protocol analyzer, real-time telemetry oscilloscope and
+        transmit station, with OBD-II (SAE J1979) vehicle diagnostics over an ELM327 or a
+        native CAN adapter. Supports SLCAN, PCAN, Kvaser, Vector, IXXAT, gs_usb,
+        SocketCAN, UDP multicast and a hardware-free virtual simulator, and exposes the
+        bus to AI agents over MCP and A2A.
+      full_output: llms-full.txt
+      sections:
+        Getting started:
+          - index.md
+          - installation.md
+          - quickstart.md
+        Hardware and protocols:
+          - hardware.md
+          - decoders.md
+        Analysis and transmission:
+          - telemetry.md
+          - transmission.md
+          - sdo_nmt.md
+        Vehicle diagnostics:
+          - obd.md
+        Automation:
+          - ai_integration.md
+          - updates.md
+
 markdown_extensions:
   - admonition
+  - pymdownx.tabbed:
+      alternate_style: true
   - pymdownx.details
   - pymdownx.superfences
   - pymdownx.highlight:
@@ -48,6 +81,7 @@ nav:
   - Telemetry & Oscilloscope: telemetry.md
   - Transmission Console: transmission.md
   - SDO & NMT Master: sdo_nmt.md
+  - OBD-II Vehicle Diagnostics: obd.md
   - AI Integration (MCP & A2A): ai_integration.md
   - Screenshots Gallery: gallery.md
   - In-App Updates: updates.md

@@ -1,0 +1,20 @@
+{
+  "name": "canopen-studio",
+  "description": "Skills for developing CAN & CANopen Studio: the Rust canopen-core engine, the Python Tkinter studio, the Slint front end and the CLI.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Sébastien Celles"
+  },
+  "homepage": "https://github.com/s-celles/canopen-studio",
+  "repository": "https://github.com/s-celles/canopen-studio",
+  "license": "GPL-3.0-or-later",
+  "keywords": [
+    "can",
+    "canopen",
+    "cia301",
+    "cia402",
+    "obd2",
+    "rust",
+    "python"
+  ]
+}

@@ -42,7 +42,7 @@ CAN & CANopen Studio features a powerful built-in **Virtual CANopen Simulator** 
 
 ### UDP Multicast (CAN over IP)
 By selecting the **UDP Multicast** interface, you can route CAN frames over your existing local network (Wi-Fi or Ethernet).
-- **Channel**: In UDP Multicast mode, the "Channel" is actually the **Multicast IP Address** (e.g., `224.0.0.1`). 
+- **Channel**: In UDP Multicast mode, the "Channel" is actually the **Multicast IP Address** (e.g., `224.0.0.1`).
 - **Virtual Bus**: All instances of CAN & CANopen Studio (or other Python-CAN clients) on the same local network that connect to the exact same Multicast IP Address will act as if they are physically wired to the same CAN bus.
 - **Isolation**: You can create multiple isolated virtual buses simultaneously by simply using different Multicast IPs (e.g., `239.0.0.1` and `239.0.0.2`).
 
