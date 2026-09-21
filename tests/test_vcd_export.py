@@ -61,8 +61,13 @@ class TestVcdWriter:
     def test_closing_reports_how_many_frames_were_written(self, tmp_path):
         path = tmp_path / "bus.vcd"
         waveform = canopen_core.VcdWriter(str(path))
-        for id_ in (0x080, 0x181, 0x701):
-            waveform.write_frame(id_, bytes([0x01]))
+        # Spaced a millisecond apart, because a frame occupies the wire for
+        # roughly 220 µs at 500 kbit/s. Left to take the current time, all
+        # three would land inside one frame's duration and two would be
+        # displaced — the writer working, not failing, but timing-dependent
+        # and therefore not something to assert on.
+        for offset, id_ in enumerate((0x080, 0x181, 0x701)):
+            waveform.write_frame(id_, bytes([0x01]), 1_000_000 + offset * 1_000)
 
         written, displaced = waveform.close()
         assert written == 3
