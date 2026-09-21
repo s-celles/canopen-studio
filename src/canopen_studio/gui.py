@@ -2574,9 +2574,23 @@ class CanStudioApp(tk.Tk):
     # =========================================================================
     # About Dialog
     # =========================================================================
+    def _engine_line(self) -> str:
+        """Which engine is actually under this front end.
+
+        The Python studio runs with or without the compiled core: `uv sync`
+        alone leaves it out, and the pure-Python fallback is slower but silent
+        about it. Say so here, where someone comparing the two front ends will
+        look.
+        """
+        try:
+            from . import canopen_core  # noqa: F401
+        except ImportError:
+            return "Engine: pure Python fallback (compiled canopen_core not installed)"
+        return "Engine: Rust canopen_core (compiled extension)"
+
     def _show_about(self):
         dlg = tk.Toplevel(self)
-        dlg.title("About - CAN & CANopen Studio")
+        dlg.title("About - CAN & CANopen Studio (Python Edition)")
         dlg.geometry("540x480")
         dlg.minsize(480, 420)
         dlg.transient(self)
@@ -2593,9 +2607,20 @@ class CanStudioApp(tk.Tk):
             foreground="#007acc",
         ).pack(pady=(0, 6))
 
+        # Both front ends ship the same name and version, so the About box is
+        # where you tell them apart. Name the edition before anything else.
+        ttk.Label(
+            f,
+            text="Python Edition — Tkinter front end",
+            font=("Segoe UI", 10, "bold"),
+            foreground="#007acc",
+        ).pack()
+
         ttk.Label(f, text=f"Version {CURRENT_VERSION}", font=("Segoe UI", 9, "italic"), foreground="#666666").pack(
-            pady=(0, 8)
+            pady=(2, 0)
         )
+
+        ttk.Label(f, text=self._engine_line(), font=("Segoe UI", 9), foreground="#666666").pack(pady=(0, 8))
 
         info_box = ttk.LabelFrame(f, text=" Project & Author ", padding=10)
         info_box.pack(fill=tk.X, pady=4)

@@ -23,6 +23,8 @@ use crate::latency::LatencyTracker;
 #[cfg(feature = "python")]
 use crate::obd2::decode_obd2_mode01_frame;
 #[cfg(feature = "python")]
+use crate::pcap::PcapNgWriter;
+#[cfg(feature = "python")]
 use crate::ring_buffer::TraceRingBuffer;
 #[cfg(feature = "python")]
 use crate::udp::UdpCanBus;
@@ -1079,6 +1081,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEdsFile>()?;
     m.add_class::<PyVirtualCanopenSimulator>()?;
     m.add_class::<PyFeedResult>()?;
+    m.add_class::<PyPcapNgWriter>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_canopen_message, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
@@ -1089,4 +1092,98 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fragment_isotp, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
+}
+
+#[cfg(feature = "python")]
+#[pyclass(name = "PcapNgWriter")]
+pub struct PyPcapNgWriter {
+    // None once closed, so a second close is harmless and a write after close
+    // is an error the caller can see rather than a panic.
+    writer: Option<PcapNgWriter<std::fs::File>>,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyPcapNgWriter {
+    /// Open a capture at `path`, either a file or a named pipe.
+    ///
+    /// A pipe path blocks until Wireshark connects to it, so this releases the
+    /// GIL: the caller's other threads keep running while we wait.
+    #[new]
+    #[pyo3(signature = (path, interface_name="canopen-studio"))]
+    pub fn new(py: Python<'_>, path: &str, interface_name: &str) -> PyResult<Self> {
+        let file = py
+            .allow_threads(|| crate::pcap::open_capture_sink(path))
+            .map_err(|e| PyIOError::new_err(format!("cannot open capture {path}: {e}")))?;
+
+        let writer = PcapNgWriter::new(file, interface_name)
+            .map_err(|e| PyIOError::new_err(format!("cannot start capture {path}: {e}")))?;
+
+        Ok(PyPcapNgWriter {
+            writer: Some(writer),
+        })
+    }
+
+    /// Append one frame to the capture.
+    ///
+    /// `dlc` only matters for a remote frame, which asks for a length it does
+    /// not carry: everywhere else the payload already states it.
+    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=false, is_remote=false, is_error=false, dlc=None))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn write_frame(
+        &mut self,
+        id: u32,
+        data: Option<&[u8]>,
+        timestamp_us: Option<u64>,
+        is_extended: bool,
+        is_remote: bool,
+        is_error: bool,
+        dlc: Option<u8>,
+    ) -> PyResult<()> {
+        let payload = data.unwrap_or(&[]);
+        let mut frame = match timestamp_us {
+            Some(ts) => CanFrame::new_with_timestamp(id, payload, ts),
+            None => CanFrame::new(id, payload),
+        }
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        frame.is_extended = is_extended;
+        frame.is_remote = is_remote;
+        frame.is_error = is_error;
+        if let Some(requested) = dlc {
+            frame.dlc = requested.min(8);
+        }
+
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| PyIOError::new_err("capture is closed"))?;
+        writer
+            .write_frame(&frame)
+            .map_err(|e| PyIOError::new_err(format!("cannot write frame: {e}")))
+    }
+
+    /// Close the capture. Closing twice is allowed.
+    pub fn close(&mut self) -> PyResult<()> {
+        if let Some(mut writer) = self.writer.take() {
+            writer
+                .flush()
+                .map_err(|e| PyIOError::new_err(format!("cannot flush capture: {e}")))?;
+        }
+        Ok(())
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Bound<'_, PyAny>>,
+        _exc_value: Option<Bound<'_, PyAny>>,
+        _traceback: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        self.close()?;
+        Ok(false)
+    }
 }

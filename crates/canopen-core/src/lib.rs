@@ -12,6 +12,7 @@ pub mod isotp;
 pub mod latency;
 pub mod nmt;
 pub mod obd2;
+pub mod pcap;
 pub mod pdo;
 pub mod pyo3_bindings;
 pub mod ring_buffer;
@@ -28,6 +29,7 @@ pub use isotp::{IsoTpError, IsoTpReassembler, fragment_isotp_message};
 pub use latency::{LatencyStats, LatencyTracker};
 pub use nmt::{MonitoredNode, NmtCommand, NmtMaster};
 pub use obd2::{ObdDtc, ObdPidReading, decode_obd2_mode01_frame, format_dtc_bytes};
+pub use pcap::{LINKTYPE_CAN_SOCKETCAN, PcapNgWriter, encode_socketcan};
 pub use pdo::{PdoMapping, SignalDefinition, SignalReading, SignalType};
 pub use ring_buffer::TraceRingBuffer;
 pub use sdo::{

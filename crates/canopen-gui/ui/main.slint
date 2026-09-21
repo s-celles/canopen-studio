@@ -607,7 +607,7 @@ export component MainWindow inherits Window {
         TouchArea { } // intercept background clicks
 
         Rectangle {
-            width: 440px; height: 320px;
+            width: 440px; height: 400px;
             background: Palette.control-background;
             border-color: Palette.border; border-width: 1px; border-radius: 8px;
 
@@ -616,7 +616,12 @@ export component MainWindow inherits Window {
 
                 Text { text: "CAN & CANopen Studio"; font-size: 18px; font-weight: 700; color: #007acc; horizontal-alignment: center; }
                 Text { text: "Universal Protocol Analyzer & Transmit Station"; font-size: 14px; font-weight: 700; color: Palette.foreground; horizontal-alignment: center; }
-                Text { text: "Version " + root.app_version + " (Rust Edition)"; font-size: 12px; font-weight: 400; color: #666666; horizontal-alignment: center; }
+                // Both front ends ship the same name and version, so the About
+                // box is where you tell them apart. Name the edition before
+                // anything else.
+                Text { text: "Rust Edition — Slint front end"; font-size: 13px; font-weight: 700; color: #007acc; horizontal-alignment: center; }
+                Text { text: "Version " + root.app_version; font-size: 12px; font-weight: 400; color: #666666; horizontal-alignment: center; }
+                Text { text: "Engine: Rust canopen-core (compiled in)"; font-size: 12px; font-weight: 400; color: #666666; horizontal-alignment: center; }
 
                 Rectangle { height: 1px; background: Palette.border;  }
 

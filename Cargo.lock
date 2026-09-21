@@ -689,6 +689,7 @@ dependencies = [
  "serde_bytes",
  "socket2",
  "thiserror 2.0.20",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
