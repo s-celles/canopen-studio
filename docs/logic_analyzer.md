@@ -137,16 +137,73 @@ for what to do with the capture.
 
 ---
 
-## What sigrok cannot do here
+## Reconstructed waveforms (`--vcd`)
 
 PulseView displays **sampled signals**, not frames handed to it by another
-program. There is no way to stream the studio's decoded traffic into it without
-writing a `libsigrok` driver in C, and that is not worth doing: Wireshark
-already covers live frame analysis.
+program. But a frame determines the bits it was made of, so the studio can
+rebuild the waveform and write it as VCD, which PulseView reads natively:
 
-A future `bitstream` module in `canopen-core` will be able to *reconstruct* a
-waveform from a decoded frame — SOF, arbitration, stuffing, CRC-15, ACK, EOF —
-and export it as VCD for PulseView. That is useful for teaching, because the
-stuff bits become visible. It is worth being blunt about what such a file is: a
-**plausible reconstruction, not a measurement**. Only a real probe on the real
-pair tells you what actually happened on the wire.
+```powershell
+# Capture from the adapter and rebuild the waveform
+uv run can-sniffer -I slcan -b 500000 -t 10 --vcd bus.vcd
+
+# Read it back without opening the GUI
+sigrok-cli -i bus.vcd -I vcd -P can:nominal_bitrate=500000 -A can=fields
+```
+
+In PulseView: **Open** the `.vcd`, then add the **CAN** decoder, set its channel
+to `CAN_RX_RECONSTRUCTED` and `nominal_bitrate` to your bus rate.
+
+!!! danger "This is a reconstruction, not a measurement"
+    The frame structure, the bit stuffing and the CRC-15 are **exact** — they
+    follow from the frame. Nothing else does:
+
+    - the **ACK slot** is drawn by assumption; the adapter never reported
+      whether anybody answered;
+    - **errors, retransmissions and lost arbitration** are absent, because the
+      controller resolved them before the frame ever reached the studio;
+    - **frames the adapter dropped** are missing, with nothing to mark the gap;
+    - the **timing between frames** comes from software receive timestamps —
+      tens of microseconds out, against a bit that lasts two at 500 kbit/s.
+
+    The warning travels with the file, not just in this page: the channel is
+    named `CAN_RX_RECONSTRUCTED`, so PulseView shows it beside the trace, and
+    the VCD header spells the rest out in full.
+
+    For anything diagnostic, probe the real pair with the analyzer as described
+    above. Use the reconstruction to *teach* the frame format — where the stuff
+    bits land, how the CRC is framed — not to judge a bus.
+
+### Knobs
+
+| Flag | Default | What it does |
+| :--- | :--- | :--- |
+| `--vcd PATH` | — | Write the waveform |
+| `--vcd-timing` | `timestamps` | `timestamps` keeps the adapter's gaps, to its own accuracy. `packed` puts frames back to back: the time axis loses all meaning, the bits become easy to read |
+| `--vcd-ack` | `acknowledged` | How to draw the ACK slot the adapter never reported |
+| `--vcd-tick-ns` | `100` | Time resolution. 100 ns is 20 samples per bit at 500 kbit/s; the decoder needs far fewer |
+
+The bit rate comes from `-b`, and the `can` decoder must be told the same one.
+
+When two frames carry the same timestamp — common, since the adapter's clock is
+coarser than a frame is long — the second is shifted later so the wire never
+carries two at once. The sniffer counts those and says how many when it exits,
+rather than quietly producing an impossible waveform.
+
+### Comparing the two
+
+Reconstructing what the adapter reported, next to the probe's recording of the
+same bus, is the interesting exercise: every frame the analyzer saw should
+appear in the reconstruction. Whatever is missing was dropped between the
+transceiver and the studio — and the ACK slots, which the reconstruction
+guesses and the probe actually measured, are worth a look too.
+
+---
+
+## What still needs the real probe
+
+Live streaming into PulseView is not possible: it has no way to take a feed from
+another program without a `libsigrok` driver written in C. Nor is anything
+below the frame — a node going error-passive, an arbitration collision, a bus
+with the wrong termination — visible in a reconstruction, because the adapter
+never reported it. That is what the transceiver and analyzer above are for.

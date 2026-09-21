@@ -15,6 +15,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 
 #[cfg(feature = "python")]
+use crate::bitstream::AckSlot;
+#[cfg(feature = "python")]
 use crate::canopen::{CanopenService, decode_canopen_frame};
 #[cfg(feature = "python")]
 use crate::frame::CanFrame;
@@ -28,6 +30,8 @@ use crate::pcap::PcapNgWriter;
 use crate::ring_buffer::TraceRingBuffer;
 #[cfg(feature = "python")]
 use crate::udp::UdpCanBus;
+#[cfg(feature = "python")]
+use crate::vcd::{Timing, VcdOptions, VcdWriter};
 #[cfg(feature = "python")]
 use std::sync::Arc;
 #[cfg(feature = "python")]
@@ -1082,6 +1086,7 @@ pub fn canopen_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyVirtualCanopenSimulator>()?;
     m.add_class::<PyFeedResult>()?;
     m.add_class::<PyPcapNgWriter>()?;
+    m.add_class::<PyVcdWriter>()?;
     m.add_function(wrap_pyfunction!(decode_canopen, m)?)?;
     m.add_function(wrap_pyfunction!(decode_canopen_message, m)?)?;
     m.add_function(wrap_pyfunction!(decode_obd2, m)?)?;
@@ -1170,6 +1175,134 @@ impl PyPcapNgWriter {
                 .map_err(|e| PyIOError::new_err(format!("cannot flush capture: {e}")))?;
         }
         Ok(())
+    }
+
+    fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &mut self,
+        _exc_type: Option<Bound<'_, PyAny>>,
+        _exc_value: Option<Bound<'_, PyAny>>,
+        _traceback: Option<Bound<'_, PyAny>>,
+    ) -> PyResult<bool> {
+        self.close()?;
+        Ok(false)
+    }
+}
+
+#[cfg(feature = "python")]
+#[pyclass(name = "VcdWriter")]
+pub struct PyVcdWriter {
+    // None once closed, so a second close is harmless and a write afterwards
+    // is an error the caller can see rather than a panic.
+    writer: Option<VcdWriter<std::fs::File>>,
+    frames_displaced: u64,
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl PyVcdWriter {
+    /// Open a reconstructed waveform at `path`.
+    ///
+    /// `timing` is "timestamps" (frames sit where the adapter said, to its own
+    /// accuracy) or "packed" (frames back to back, time axis meaningless).
+    /// `ack` is "acknowledged" or "unanswered".
+    #[new]
+    #[pyo3(signature = (path, bitrate=500_000, tick_ns=100, timing="timestamps", ack="acknowledged"))]
+    pub fn new(path: &str, bitrate: u32, tick_ns: u32, timing: &str, ack: &str) -> PyResult<Self> {
+        let timing = match timing {
+            "timestamps" => Timing::Timestamps,
+            "packed" => Timing::Packed,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "timing must be 'timestamps' or 'packed', not '{other}'"
+                )));
+            }
+        };
+        let ack = match ack {
+            "acknowledged" => AckSlot::Acknowledged,
+            "unanswered" => AckSlot::Unanswered,
+            other => {
+                return Err(PyValueError::new_err(format!(
+                    "ack must be 'acknowledged' or 'unanswered', not '{other}'"
+                )));
+            }
+        };
+        if tick_ns == 0 {
+            return Err(PyValueError::new_err("tick_ns must be at least 1"));
+        }
+
+        let file = std::fs::File::create(path)
+            .map_err(|e| PyIOError::new_err(format!("cannot open waveform {path}: {e}")))?;
+        let options = VcdOptions {
+            bitrate,
+            tick_ns,
+            timing,
+            ack,
+        };
+        let writer = VcdWriter::new(file, options)
+            .map_err(|e| PyIOError::new_err(format!("cannot start waveform {path}: {e}")))?;
+
+        Ok(PyVcdWriter {
+            writer: Some(writer),
+            frames_displaced: 0,
+        })
+    }
+
+    /// Append one frame, rebuilt as a waveform.
+    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=false, is_remote=false, dlc=None))]
+    pub fn write_frame(
+        &mut self,
+        id: u32,
+        data: Option<&[u8]>,
+        timestamp_us: Option<u64>,
+        is_extended: bool,
+        is_remote: bool,
+        dlc: Option<u8>,
+    ) -> PyResult<()> {
+        let payload = data.unwrap_or(&[]);
+        let mut frame = match timestamp_us {
+            Some(ts) => CanFrame::new_with_timestamp(id, payload, ts),
+            None => CanFrame::new(id, payload),
+        }
+        .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        frame.is_extended = is_extended;
+        frame.is_remote = is_remote;
+        if let Some(requested) = dlc {
+            frame.dlc = requested.min(8);
+        }
+
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| PyIOError::new_err("waveform is closed"))?;
+        writer
+            .write_frame(&frame)
+            .map_err(|e| PyIOError::new_err(format!("cannot write frame: {e}")))
+    }
+
+    /// How many frames had to be moved because the previous one was still on
+    /// the wire at their reported time. Only meaningful after close().
+    #[getter]
+    pub fn frames_displaced(&self) -> u64 {
+        self.frames_displaced
+    }
+
+    /// Close the waveform, returning (frames written, frames displaced).
+    pub fn close(&mut self) -> PyResult<(u64, u64)> {
+        match self.writer.take() {
+            Some(writer) => {
+                let (written, displaced) = writer
+                    .finish()
+                    .map_err(|e| PyIOError::new_err(format!("cannot finish waveform: {e}")))?;
+                self.frames_displaced = displaced;
+                Ok((written, displaced))
+            }
+            None => Ok((0, self.frames_displaced)),
+        }
     }
 
     fn __enter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {

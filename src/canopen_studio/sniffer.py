@@ -46,6 +46,10 @@ def run_sniffer(
     profile: str = "All / Auto",
     simulate: bool = False,
     pcap_file: Optional[str] = None,
+    vcd_file: Optional[str] = None,
+    vcd_timing: str = "timestamps",
+    vcd_ack: str = "acknowledged",
+    vcd_tick_ns: int = 100,
 ):
     """Main reception and display loop using the CANopen protocol layer."""
     reg = get_default_registry()
@@ -67,6 +71,8 @@ def run_sniffer(
         print(f" Logging to CSV  : {log_file}")
     if pcap_file:
         print(f" PCAP-NG capture : {pcap_file}")
+    if vcd_file:
+        print(f" VCD waveform    : {vcd_file} (reconstructed, {vcd_timing}, ack {vcd_ack})")
     if max_count:
         print(f" Max Frame Count : {max_count}")
     if max_duration:
@@ -101,6 +107,27 @@ def run_sniffer(
         except OSError as err:
             print(f"[-] Cannot open PCAP-NG capture '{pcap_file}': {err}")
             sys.exit(1)
+
+    vcd_writer = None
+    if vcd_file:
+        try:
+            from . import canopen_core
+        except ImportError:
+            print("[-] VCD export needs the compiled core. Run 'just rust-python' first.")
+            sys.exit(1)
+        try:
+            vcd_writer = canopen_core.VcdWriter(
+                vcd_file,
+                bitrate,
+                vcd_tick_ns,
+                vcd_timing,
+                vcd_ack,
+            )
+        except (OSError, ValueError) as err:
+            print(f"[-] Cannot open VCD waveform '{vcd_file}': {err}")
+            sys.exit(1)
+        print("[!] The VCD waveform is RECONSTRUCTED from decoded frames, not measured.")
+        print("[!] Structure, stuffing and CRC are exact; ACK, errors and exact timing are not.")
 
     bus = None
     simulator = None
@@ -161,6 +188,22 @@ def run_sniffer(
                     print(f"\n[!] PCAP-NG capture stopped: {err}")
                     pcap_writer = None
 
+            # Same reasoning as the capture above: the waveform records the
+            # whole bus, not the subset the terminal happens to show.
+            if vcd_writer:
+                try:
+                    vcd_writer.write_frame(
+                        raw_msg.arbitration_id,
+                        bytes(raw_msg.data) if raw_msg.data else b"",
+                        int(now * 1_000_000),
+                        bool(raw_msg.is_extended_id),
+                        bool(raw_msg.is_remote_frame),
+                        raw_msg.dlc,
+                    )
+                except OSError as err:
+                    print(f"\n[!] VCD export stopped: {err}")
+                    vcd_writer = None
+
             # Filter Standard / Extended
             if extended_only and not raw_msg.is_extended_id:
                 continue
@@ -204,6 +247,14 @@ def run_sniffer(
             f_csv.close()
         if pcap_writer:
             pcap_writer.close()
+        if vcd_writer:
+            written, displaced = vcd_writer.close()
+            print(f"\n[+] VCD waveform: {written} frame(s) reconstructed into {vcd_file}")
+            if displaced:
+                # The adapter's clock is coarser than a frame is long, so some
+                # frames cannot sit exactly where it said without overlapping.
+                print(f"[!] {displaced} frame(s) shifted later to keep one frame on the wire at a time.")
+            print("[!] Remember: this waveform is reconstructed, not measured.")
         print(f"\n[+] Finished. Total bus frames: {msg_count} (Displayed: {displayed_count})")
 
 
@@ -390,6 +441,43 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--vcd",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write a VCD waveform for sigrok/PulseView, RECONSTRUCTED from the decoded "
+            "frames (structure, stuffing and CRC are exact; ACK, errors and exact timing "
+            "are not). Decode it with the 'can' decoder at the same bitrate."
+        ),
+    )
+    parser.add_argument(
+        "--vcd-timing",
+        choices=["timestamps", "packed"],
+        default="timestamps",
+        help=(
+            "Where frames sit in the waveform: 'timestamps' keeps the adapter's gaps "
+            "(to its own accuracy), 'packed' puts frames back to back and makes the "
+            "time axis meaningless but the bits easy to read. Default: timestamps."
+        ),
+    )
+    parser.add_argument(
+        "--vcd-ack",
+        choices=["acknowledged", "unanswered"],
+        default="acknowledged",
+        help=("How to draw the ACK slot, which the adapter never reports. Default: acknowledged."),
+    )
+    parser.add_argument(
+        "--vcd-tick-ns",
+        type=int,
+        default=100,
+        metavar="NS",
+        help=(
+            "Waveform time resolution in nanoseconds; it sets the samples per bit "
+            "(100 ns gives 20 at 500 kbit/s). Default: 100."
+        ),
+    )
+    parser.add_argument(
         "-n",
         "--count",
         type=int,
@@ -464,6 +552,10 @@ def main():
             profile=args.profile,
             simulate=args.simulate,
             pcap_file=args.pcap,
+            vcd_file=args.vcd,
+            vcd_timing=args.vcd_timing,
+            vcd_ack=args.vcd_ack,
+            vcd_tick_ns=args.vcd_tick_ns,
         )
 
 
