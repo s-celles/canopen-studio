@@ -11,6 +11,12 @@ description = "High-performance CLI sniffer, latency monitor, and benchmark tool
 name = "canopen-cli"
 path = "src/main.rs"
 
+# Wireshark runs an extcap as its own executable, with extcap's flags at the
+# top level, so this cannot be a subcommand of canopen-cli.
+[[bin]]
+name = "canopen-extcap"
+path = "src/bin/canopen-extcap.rs"
+
 [dependencies]
 canopen-core = { path = "../canopen-core" }
 clap = { workspace = true }
