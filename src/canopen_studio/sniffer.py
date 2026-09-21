@@ -45,6 +45,7 @@ def run_sniffer(
     max_duration: Optional[float] = None,
     profile: str = "All / Auto",
     simulate: bool = False,
+    pcap_file: Optional[str] = None,
 ):
     """Main reception and display loop using the CANopen protocol layer."""
     reg = get_default_registry()
@@ -64,6 +65,8 @@ def run_sniffer(
         print(f" ID Filter       : 0x{filter_id:X}")
     if log_file:
         print(f" Logging to CSV  : {log_file}")
+    if pcap_file:
+        print(f" PCAP-NG capture : {pcap_file}")
     if max_count:
         print(f" Max Frame Count : {max_count}")
     if max_duration:
@@ -80,6 +83,24 @@ def run_sniffer(
         f_csv = open(log_file, "w", newline="", encoding="utf-8")
         csv_writer = csv.writer(f_csv)
         csv_writer.writerow(["Timestamp", "Format", "CAN_ID", "RTR", "DLC", "Data_Hex", "Decode_Info", "Signals"])
+
+    pcap_writer = None
+    if pcap_file:
+        try:
+            from . import canopen_core
+        except ImportError:
+            print("[-] PCAP-NG capture needs the compiled core. Run 'just rust-python' first.")
+            sys.exit(1)
+        if pcap_file.startswith("\\\\.\\pipe\\") or pcap_file.startswith("//./pipe/"):
+            # Opening the pipe blocks until Wireshark connects, so say why the
+            # sniffer appears to hang before the first frame.
+            print(f"[*] Waiting for Wireshark to connect to {pcap_file} ...")
+            print(f"[*]   wireshark -i {pcap_file} -k")
+        try:
+            pcap_writer = canopen_core.PcapNgWriter(pcap_file, f"{interface} {channel}")
+        except OSError as err:
+            print(f"[-] Cannot open PCAP-NG capture '{pcap_file}': {err}")
+            sys.exit(1)
 
     bus = None
     simulator = None
@@ -119,6 +140,26 @@ def run_sniffer(
             msg_count += 1
             now = raw_msg.timestamp if raw_msg.timestamp else time.time()
             elapsed = now - start_time
+
+            # The capture is written before the display filters, so Wireshark
+            # always sees the whole bus: its own filters are better than ours,
+            # and a silently truncated capture is a trap for whoever reads it.
+            if pcap_writer:
+                try:
+                    pcap_writer.write_frame(
+                        raw_msg.arbitration_id,
+                        bytes(raw_msg.data) if raw_msg.data else b"",
+                        int(now * 1_000_000),
+                        bool(raw_msg.is_extended_id),
+                        bool(raw_msg.is_remote_frame),
+                        bool(raw_msg.is_error_frame),
+                        raw_msg.dlc,
+                    )
+                except OSError as err:
+                    # Wireshark closed the pipe. Keep sniffing rather than
+                    # losing the session over a viewer that went away.
+                    print(f"\n[!] PCAP-NG capture stopped: {err}")
+                    pcap_writer = None
 
             # Filter Standard / Extended
             if extended_only and not raw_msg.is_extended_id:
@@ -161,6 +202,8 @@ def run_sniffer(
             bus.shutdown()
         if f_csv:
             f_csv.close()
+        if pcap_writer:
+            pcap_writer.close()
         print(f"\n[+] Finished. Total bus frames: {msg_count} (Displayed: {displayed_count})")
 
 
@@ -336,6 +379,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to save captured frames as a CSV file.",
     )
     parser.add_argument(
+        "--pcap",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write a PCAP-NG capture Wireshark can read. PATH is a file, or a named pipe "
+            r"for a live capture (\\.\pipe\canopen-studio on Windows, a mkfifo path elsewhere): "
+            "the sniffer creates the pipe and waits for Wireshark to connect to it."
+        ),
+    )
+    parser.add_argument(
         "-n",
         "--count",
         type=int,
@@ -409,6 +463,7 @@ def main():
             max_duration=args.duration,
             profile=args.profile,
             simulate=args.simulate,
+            pcap_file=args.pcap,
         )
 
 

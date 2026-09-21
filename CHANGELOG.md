@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **PCAP-NG capture for Wireshark (`crates/canopen-core/src/pcap.rs`)**: frames are written with the `LINKTYPE_CAN_SOCKETCAN` encapsulation Wireshark reads natively, so its CANopen, J1939 and ISO 15765 dissectors apply without a plugin. Exposed to Python as `canopen_core.PcapNgWriter` and driven from the sniffer with `can-sniffer --pcap <path>`. The path may be a file or a named pipe (`\\.\pipe\canopen-studio`, or a FIFO), which gives a live capture: the studio creates the pipe and waits, then Wireshark connects to it (`wireshark -i <pipe> -k`) — Wireshark connects to pipes, it never creates them. The capture records every frame received, before the display filters, so it never silently omits traffic.
+- **Hardware documentation for signal-level analysis** (`docs/logic_analyzer.md`): probing the bus with a CAN transceiver and an FX2 logic analyzer alongside the adapter — bill of materials, DB9 wiring, the termination trap, PulseView settings, and why a lone adapter on a bus never gets its frames acknowledged.
+- **Wireshark integration guide** (`docs/wireshark.md`): capture files, live pipes, `Decode As` for CANopen, and useful display filters.
+
 ## [0.5.0] - 2026-09-21
 
 ### Added

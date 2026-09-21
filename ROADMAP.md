@@ -201,7 +201,7 @@ Mobile deployment uniquely enables field-service agentic features:
 | **CANopen FD Support** | v0.4.0 | Support for flexible data-rate frames up to 64 bytes payload (CiA 1301). |
 | **UDS (ISO 14229) over ISO-TP** | v0.4.0 | Full automotive diagnostics session control, ECU flashing, and security access routines. |
 | **DBC / EDS / DCF Importer** | v0.3.5 | Import industry-standard database files to decode proprietary CAN frames into engineering units. |
-| **PCAP / PCAPng Export** | v0.3.5 | Wireshark-compatible packet capture export with CAN subdissectors. |
+| **PCAP / PCAPng Export** | ✅ Delivered | PCAP-NG with `LINKTYPE_CAN_SOCKETCAN`, read natively by Wireshark and its CANopen / J1939 / ISO 15765 dissectors. `can-sniffer --pcap <file\|pipe>` writes a capture file, or streams live into a named pipe Wireshark is reading. |
 | **Edge ML Anomaly Detection** | v0.5.0 | Embedded ONNX runtime in the Rust core for local unsupervised anomaly detection on high-speed bus traffic. |
 
 ---

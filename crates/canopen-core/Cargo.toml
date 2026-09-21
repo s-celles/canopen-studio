@@ -24,4 +24,18 @@ crossbeam-channel = { workspace = true }
 thiserror = { workspace = true }
 pyo3 = { version = "0.23", features = ["extension-module"], optional = true }
 
+# Wireshark connects to a named pipe rather than creating one, so a live
+# capture on Windows means being the pipe server. Unix gets the same
+# rendezvous from mkfifo and needs nothing here.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Pipes",
+    # CreateNamedPipeW's signature reaches into these: the access flags live in
+    # FileSystem, SECURITY_ATTRIBUTES in Security, OVERLAPPED in System::IO.
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_IO",
+] }
+
 [dev-dependencies]

@@ -146,3 +146,18 @@ CANopen Studio includes a built-in virtual node that generates telemetry (Heartb
   # Launch a simulation node broadcasting over the office Wi-Fi
   uv run can-sniffer -I udp_multicast -c 224.0.0.1 --simulate
   ```
+
+---
+
+## Watching the Bus One Layer Below
+
+A USB-CAN adapter reports the frames its controller accepted; it cannot tell you
+whether your frame was acknowledged, why a node went error-passive, or how many
+frames it dropped when the bus got busy. A CAN transceiver board and a cheap USB
+logic analyzer answer those questions, in parallel with the adapter and on the
+same wire.
+
+See **[Logic Analyzer & Signal Analysis](logic_analyzer.md)** for the bill of
+materials, the DB9 wiring, the termination trap, and the PulseView settings —
+and **[Wireshark Integration](wireshark.md)** to feed the frames themselves into
+Wireshark, live.

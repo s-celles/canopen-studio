@@ -49,10 +49,12 @@ plugins:
         Hardware and protocols:
           - hardware.md
           - decoders.md
+          - logic_analyzer.md
         Analysis and transmission:
           - telemetry.md
           - transmission.md
           - sdo_nmt.md
+          - wireshark.md
         Vehicle diagnostics:
           - obd.md
         Automation:
@@ -78,9 +80,11 @@ nav:
   - Quick Start: quickstart.md
   - Hardware & Interfaces: hardware.md
   - Protocol Stack & Decoders: decoders.md
+  - Logic Analyzer & Signals: logic_analyzer.md
   - Telemetry & Oscilloscope: telemetry.md
   - Transmission Console: transmission.md
   - SDO & NMT Master: sdo_nmt.md
+  - Wireshark Integration: wireshark.md
   - OBD-II Vehicle Diagnostics: obd.md
   - AI Integration (MCP & A2A): ai_integration.md
   - Screenshots Gallery: gallery.md
