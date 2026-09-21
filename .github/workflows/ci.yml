@@ -110,8 +110,18 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # The cache key covers the OS, the architecture and the lockfiles, but not
+      # the interpreter. All four Python jobs on a runner would share one target/
+      # directory, including the cached PyO3 build-script output that carries the
+      # interpreter-specific link arguments: a target/ built under 3.13 then asks
+      # the 3.10 job's linker for python313.lib, which it does not have (LNK1181
+      # on Windows). PYO3_PYTHON does not save us — build_extension.py sets it to
+      # the venv path, which is the same string in every job, so cargo sees no
+      # change and reuses the stale output.
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          key: py${{ matrix.python-version }}
 
       - name: Build the canopen_core Python extension
         run: uv run python scripts/build_extension.py
