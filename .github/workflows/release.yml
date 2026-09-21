@@ -44,6 +44,18 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # Without this the published binaries ship with no canopen_core at all.
+      # uv sync cannot produce it — the build backend is plain setuptools and the
+      # Rust workspace sits beside it — and PyInstaller can only bundle what is
+      # already in the package. UdpBus and CanopenLayer would fall back to Python
+      # and merely lose the speed, but IsoTpReassembler re-raises the ImportError,
+      # so the OBD-II tab would fail on first use in a released build.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the canopen_core Python extension
+        run: uv run python scripts/build_extension.py
+
       - name: Generate application icons
         run: uv run --with pillow python scripts/generate_icon.py
 
