@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-21
+
 ### Added
 - **Rust High-Performance Core Engine (`crates/canopen-core`)** (Phase 1A):
   - Compact stack-allocated `CanFrame` (24 bytes) supporting zero heap allocations, microsecond timestamps, and dual serialization (MessagePack `python-can` interop and raw compact binary).
@@ -57,10 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Linux→Mac: min **5.92 ms**, avg **25.94 ms**, 0% loss (vs Python: min 24.85 ms, avg 76.42 ms — **−76% min, −66% avg**).
   - Mac→Linux: min **6.15 ms**, avg **71.66 ms**, 0% loss (vs Python: min 18.15 ms, avg 74.32 ms — **−66% min**).
   - Gain attributed to elimination of Python GIL overhead, `time.perf_counter()` scheduling latency, and msgpack serialization round-trips. Remaining high-end outliers are Wi-Fi 802.11 burst jitter (DTIM beacons, power-save cycles), independent of the language runtime.
-
-## [0.5.0] - 2026-09-19
-
-### Added
 - **OBD-II vehicle diagnostics (SAE J1979)**, in two independently testable parts: an adapter backend and an application layer.
 - `DiagnosticInterface`, a transport-neutral abstraction deliberately separate from the CAN adapter catalog. An ELM327 is not a transparent bridge — it runs its own protocol autodetection and ISO-TP handling and answers in ASCII hexadecimal — so it cannot honour the contract that `open_can_bus()` consumers (the CANopen layer, the trace, the plotter, the bridge) all depend on.
 - `ElmDiagnosticInterface`: ELM327 over USB, classic Bluetooth SPP (via a bound `rfcomm` or `COMx` port) and TCP. Bluetooth Low Energy is documented as unsupported, because BLE adapters expose a vendor-specific GATT service rather than a serial port.
