@@ -648,9 +648,6 @@ fn main() -> Result<(), slint::PlatformError> {
             // A recv error is a read timeout on an idle bus; just poll again.
             if let Ok((frame, _addr)) = bus.recv() {
                 trace_count += 1;
-                    println!("RX: id={:x} len={}", frame.id, frame.payload().len());
-                println!("RX: id={:x} len={}", frame.id, frame.payload().len());
-                println!("RX: id={:x} len={}", frame.id, frame.payload().len());
                 rate_window_count += 1;
                 let id = frame.id;
                 let data = frame.payload();
