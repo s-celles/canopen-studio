@@ -61,6 +61,15 @@ def main() -> int:
     env = dict(os.environ)
     env["PYO3_PYTHON"] = sys.executable
 
+    if sys.platform == "darwin":
+        # PyO3's extension-module feature deliberately does not link libpython:
+        # the interpreter supplies those symbols when it loads the module. Only
+        # the macOS linker has to be told that, otherwise it stops on undefined
+        # _PyExc_* symbols. Linux and Windows need nothing here, which is why
+        # this went unnoticed until a release built on macOS.
+        flags = env.get("RUSTFLAGS", "")
+        env["RUSTFLAGS"] = f"{flags} -C link-arg=-undefined -C link-arg=dynamic_lookup".strip()
+
     print("==>", " ".join(cmd))
     print("==> PYO3_PYTHON =", sys.executable)
     result = subprocess.run(cmd, cwd=PROJECT_ROOT, env=env)

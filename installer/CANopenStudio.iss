@@ -12,6 +12,9 @@
 #define MyAppPublisher "Sébastien Celles"
 #define MyAppURL "https://github.com/s-celles/canopen-studio"
 #define MyAppExeName "CANopen-Studio.exe"
+; The Slint front end, copied beside the Python one by the release workflow
+; and picked up by the [Files] wildcard below.
+#define MyNativeExeName "canopen-gui.exe"
 
 [Setup]
 ; NOTE: The value of AppId uniquely identifies this application.
@@ -54,6 +57,7 @@ Source: "..\assets\icon.ico"; DestDir: "{app}\assets"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"
+Name: "{group}\{#MyAppName} (native edition)"; Filename: "{app}\{#MyNativeExeName}"; IconFilename: "{app}\assets\icon.ico"
 Name: "{group}\Documentation (README)"; Filename: "{app}\README.md"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"; Tasks: desktopicon
