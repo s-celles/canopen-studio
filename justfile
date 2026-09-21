@@ -141,6 +141,18 @@ build-portable:
 rust-build:
     cargo build --workspace
 
+# Build the release GUI for distribution, with its dependency list embedded.
+# A stripped Rust binary names none of its crates, so an SBOM taken from the
+# published archive comes back empty and "no vulnerabilities" means nothing.
+# cargo-auditable embeds the list; syft and `cargo audit bin` then read it.
+# Install once: cargo install cargo-auditable cargo-audit
+rust-release:
+    cargo auditable build --release -p canopen-gui
+
+# Check the released binary's embedded dependencies against RustSec
+rust-audit: rust-release
+    cargo audit bin target/release/canopen-gui.exe
+
 # Run Rust unit tests
 rust-test:
     cargo test --workspace
