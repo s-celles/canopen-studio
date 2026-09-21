@@ -39,7 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3-tk libxcb-xinerama0
+          sudo apt-get install -y python3-tk libxcb-xinerama0 libfontconfig1-dev pkg-config
 
       - name: Install dependencies
         run: uv sync
@@ -61,6 +61,20 @@ jobs:
 
       - name: Build standalone application with PyInstaller
         run: uv run --with pyinstaller python scripts/build_exe.py --clean
+
+      # 0.5.0 announces a native front end that nothing was shipping: the
+      # packaging built only src/canopen_studio/gui.py. This must run after
+      # PyInstaller, which wipes dist/ with --clean.
+      - name: Build the native front end
+        run: cargo build --release -p canopen-gui
+
+      - name: Add the native front end to the bundle
+        shell: bash
+        run: |
+          exe=canopen-gui
+          [ "$RUNNER_OS" = "Windows" ] && exe=canopen-gui.exe
+          cp "target/release/$exe" "dist/CANopen-Studio/$exe"
+          ls -l "dist/CANopen-Studio/$exe"
 
       - name: Build Portable Archive (Windows)
         if: runner.os == 'Windows'
