@@ -8,7 +8,7 @@ use canopen_core::nmt::{MonitoredNode, NmtCommand, NmtMaster};
 use canopen_core::obd2::{
     build_obd2_mode01_request, decode_obd2_mode01_frame, SUPPORTED_MODE01_PIDS,
 };
-use canopen_core::sdo::{build_sdo_read, parse_sdo_frame, SdoMessage};
+use canopen_core::sdo::{build_sdo_read, build_sdo_write, parse_sdo_frame, SdoMessage};
 use canopen_core::simulator_ext::spawn_udp_simulator_bound;
 use canopen_core::telemetry::DriveTelemetry;
 use canopen_core::udp::UdpCanBus;
@@ -251,6 +251,67 @@ fn parse_sdo_node_id(text: &str) -> Result<u8, String> {
     Ok(id)
 }
 
+/// The width and signedness an SDO download writes, taken from the label the
+/// type chooser shows. Matching on the leading token keeps the mapping
+/// readable and survives the parenthetical being reworded.
+struct SdoWriteType {
+    width: usize,
+    signed: bool,
+}
+
+fn sdo_write_type(label: &str) -> Result<SdoWriteType, String> {
+    let token = label.split_whitespace().next().unwrap_or("");
+    let (width, signed) = match token {
+        "uint8" => (1, false),
+        "uint16" => (2, false),
+        "uint32" => (4, false),
+        "int16" => (2, true),
+        "int32" => (4, true),
+        _ => return Err(format!("'{label}' is not a known data type")),
+    };
+    Ok(SdoWriteType { width, signed })
+}
+
+/// Encode the value an engineer typed into the little-endian bytes of an
+/// expedited download.
+///
+/// Decimal by default, hex behind an explicit `0x`, as the sub-index field
+/// reads them: an object value is as often 1500 as it is 0x1F, and silently
+/// reading a bare `10` as sixteen would write the wrong number.
+fn encode_sdo_value(text: &str, ty: &SdoWriteType) -> Result<Vec<u8>, String> {
+    let t = text.trim();
+    if t.is_empty() {
+        return Err("value is empty".to_string());
+    }
+    let (negative, digits) = match t.strip_prefix('-') {
+        Some(rest) => (true, rest.trim_start()),
+        None => (false, t),
+    };
+    let magnitude = match digits
+        .strip_prefix("0x")
+        .or_else(|| digits.strip_prefix("0X"))
+    {
+        Some(hex) => i64::from_str_radix(hex, 16),
+        None => digits.parse::<i64>(),
+    }
+    .map_err(|_| format!("'{t}' is not a number"))?;
+    let value = if negative { -magnitude } else { magnitude };
+
+    let bits = ty.width * 8;
+    let (low, high) = if ty.signed {
+        (-(1_i64 << (bits - 1)), (1_i64 << (bits - 1)) - 1)
+    } else {
+        (0, (1_i64 << bits) - 1)
+    };
+    if value < low || value > high {
+        return Err(format!(
+            "{value} does not fit in {} bytes ({low}..={high})",
+            ty.width
+        ));
+    }
+    Ok(value.to_le_bytes()[..ty.width].to_vec())
+}
+
 fn hex_bytes(data: &[u8]) -> String {
     data.iter()
         .map(|b| format!("{b:02X}"))
@@ -308,6 +369,18 @@ fn sdo_response_row(msg: &SdoMessage) -> Option<SdoRow> {
                 Some(n) => format!("{n} bytes to follow"),
                 None => "size unknown".to_string(),
             },
+            String::new(),
+        ]),
+        SdoMessage::DownloadResponse {
+            node_id,
+            index,
+            subindex,
+        } => Some([
+            format!("{index:#06X}:{subindex:02X}"),
+            format!("Written (node {node_id})"),
+            // The server confirms the write without echoing the value, so the
+            // row says what happened rather than inventing one.
+            "download accepted".to_string(),
             String::new(),
         ]),
         SdoMessage::Abort {
@@ -575,6 +648,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // A recv error is a read timeout on an idle bus; just poll again.
             if let Ok((frame, _addr)) = bus.recv() {
                 trace_count += 1;
+                    println!("RX: id={:x} len={}", frame.id, frame.payload().len());
+                println!("RX: id={:x} len={}", frame.id, frame.payload().len());
+                println!("RX: id={:x} len={}", frame.id, frame.payload().len());
                 rate_window_count += 1;
                 let id = frame.id;
                 let data = frame.payload();
@@ -851,6 +927,8 @@ fn sdo_rows_to_model(rows: Vec<SdoRow>) -> ModelRc<ModelRc<StandardListViewItem>
 fn wire_sdo_tab(ui: &MainWindow, bus: Arc<UdpCanBus>, total_tx: Arc<AtomicI32>, sdo_log: SdoLog) {
     {
         let ui_handle = ui.as_weak();
+        let bus = Arc::clone(&bus);
+        let total_tx = Arc::clone(&total_tx);
         ui.on_sdo_read(move |node_text, index_text, sub_text| {
             let Some(ui) = ui_handle.upgrade() else {
                 return;
@@ -881,6 +959,47 @@ fn wire_sdo_tab(ui: &MainWindow, bus: Arc<UdpCanBus>, total_tx: Arc<AtomicI32>, 
                 }
             }
         });
+    }
+
+    {
+        let ui_handle = ui.as_weak();
+        let bus = Arc::clone(&bus);
+        let total_tx = Arc::clone(&total_tx);
+        ui.on_sdo_write(
+            move |node_text, index_text, sub_text, value_text, type_text| {
+                let Some(ui) = ui_handle.upgrade() else {
+                    return;
+                };
+                let outcome: Result<String, String> = (|| {
+                    let node = parse_sdo_node_id(&node_text)?;
+                    let index = parse_index(&index_text)?;
+                    let subindex = parse_subindex(&sub_text)?;
+                    let ty = sdo_write_type(&type_text)?;
+                    let data = encode_sdo_value(&value_text, &ty)?;
+                    let frame = build_sdo_write(node, index, subindex, &data)
+                        .map_err(|e| format!("cannot build the SDO download: {e:?}"))?;
+                    bus.send(&frame)
+                        .map_err(|e| format!("transmission failed: {e:?}"))?;
+                    total_tx.fetch_add(1, Ordering::Relaxed);
+                    Ok(format!(
+                        "Wrote {index:#06X}:{subindex:02X} = {} to node {node}, waiting for 0x{:03X}...",
+                        hex_bytes(&data),
+                        0x580 + node as u32
+                    ))
+                })();
+                ui.set_total_tx(total_tx.load(Ordering::Relaxed));
+                match outcome {
+                    Ok(msg) => {
+                        ui.set_sdo_status_is_error(false);
+                        ui.set_sdo_status(msg.into());
+                    }
+                    Err(msg) => {
+                        ui.set_sdo_status_is_error(true);
+                        ui.set_sdo_status(format!("Error: {msg}").into());
+                    }
+                }
+            },
+        );
     }
 
     {
@@ -1362,6 +1481,123 @@ mod tests {
             "only server answers belong in the log"
         );
     }
+
+    #[test]
+    fn every_write_type_maps_to_its_width_and_sign() {
+        for (label, width, signed) in [
+            ("uint8 (1 byte)", 1, false),
+            ("uint16 (2 bytes)", 2, false),
+            ("uint32 (4 bytes)", 4, false),
+            ("int16 (2 bytes)", 2, true),
+            ("int32 (4 bytes)", 4, true),
+        ] {
+            let ty = sdo_write_type(label).expect("the chooser only offers known types");
+            assert_eq!((ty.width, ty.signed), (width, signed), "{label}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_write_type_is_refused() {
+        assert!(sdo_write_type("float32 (4 bytes)").is_err());
+        assert!(sdo_write_type("").is_err());
+    }
+
+    #[test]
+    fn a_write_value_is_decimal_unless_it_is_prefixed_with_0x() {
+        let u16_ = sdo_write_type("uint16 (2 bytes)").unwrap();
+        assert_eq!(encode_sdo_value("1500", &u16_).unwrap(), vec![0xDC, 0x05]);
+        assert_eq!(encode_sdo_value("0x05DC", &u16_).unwrap(), vec![0xDC, 0x05]);
+        // A bare 10 is ten, not sixteen.
+        assert_eq!(encode_sdo_value("10", &u16_).unwrap(), vec![0x0A, 0x00]);
+    }
+
+    #[test]
+    fn a_value_is_encoded_little_endian_at_the_width_of_its_type() {
+        let u8_ = sdo_write_type("uint8 (1 byte)").unwrap();
+        let u32_ = sdo_write_type("uint32 (4 bytes)").unwrap();
+        assert_eq!(encode_sdo_value("0x7F", &u8_).unwrap(), vec![0x7F]);
+        assert_eq!(
+            encode_sdo_value("0x00020192", &u32_).unwrap(),
+            vec![0x92, 0x01, 0x02, 0x00]
+        );
+    }
+
+    #[test]
+    fn a_negative_value_is_encoded_in_twos_complement() {
+        let i16_ = sdo_write_type("int16 (2 bytes)").unwrap();
+        let i32_ = sdo_write_type("int32 (4 bytes)").unwrap();
+        assert_eq!(encode_sdo_value("-1", &i16_).unwrap(), vec![0xFF, 0xFF]);
+        assert_eq!(encode_sdo_value("-1500", &i16_).unwrap(), vec![0x24, 0xFA]);
+        assert_eq!(
+            encode_sdo_value("-2", &i32_).unwrap(),
+            vec![0xFE, 0xFF, 0xFF, 0xFF]
+        );
+    }
+
+    #[test]
+    fn each_type_accepts_its_full_range_and_nothing_beyond() {
+        let u8_ = sdo_write_type("uint8 (1 byte)").unwrap();
+        assert_eq!(encode_sdo_value("255", &u8_).unwrap(), vec![0xFF]);
+        assert!(encode_sdo_value("256", &u8_).is_err());
+        assert!(
+            encode_sdo_value("-1", &u8_).is_err(),
+            "unsigned has no sign"
+        );
+
+        let i16_ = sdo_write_type("int16 (2 bytes)").unwrap();
+        assert_eq!(encode_sdo_value("32767", &i16_).unwrap(), vec![0xFF, 0x7F]);
+        assert_eq!(encode_sdo_value("-32768", &i16_).unwrap(), vec![0x00, 0x80]);
+        assert!(encode_sdo_value("32768", &i16_).is_err());
+        // 0xFFFF is 65535, which is out of range for a signed 16-bit object.
+        assert!(encode_sdo_value("0xFFFF", &i16_).is_err());
+
+        let u32_ = sdo_write_type("uint32 (4 bytes)").unwrap();
+        assert_eq!(
+            encode_sdo_value("4294967295", &u32_).unwrap(),
+            vec![0xFF, 0xFF, 0xFF, 0xFF]
+        );
+        assert!(encode_sdo_value("4294967296", &u32_).is_err());
+    }
+
+    #[test]
+    fn an_empty_or_malformed_write_value_is_refused() {
+        let u16_ = sdo_write_type("uint16 (2 bytes)").unwrap();
+        assert!(encode_sdo_value("", &u16_).is_err());
+        assert!(encode_sdo_value("   ", &u16_).is_err());
+        assert!(encode_sdo_value("twelve", &u16_).is_err());
+        assert!(encode_sdo_value("0xZZ", &u16_).is_err());
+    }
+
+    #[test]
+    fn an_encoded_value_becomes_a_download_frame_the_server_can_read() {
+        let ty = sdo_write_type("uint16 (2 bytes)").unwrap();
+        let data = encode_sdo_value("0x000F", &ty).unwrap();
+        let frame = build_sdo_write(1, 0x6040, 0, &data).unwrap();
+
+        assert_eq!(frame.id, 0x601, "SDO client request to node 1");
+        match parse_sdo_frame(&frame).expect("the download must parse") {
+            SdoMessage::ExpeditedDownloadRequest {
+                node_id,
+                index,
+                subindex,
+                data,
+            } => {
+                assert_eq!((node_id, index, subindex), (1, 0x6040, 0));
+                assert_eq!(data, vec![0x0F, 0x00]);
+            }
+            other => panic!("expected an expedited download, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_download_response_is_logged_as_a_write_that_was_accepted() {
+        let confirmation = CanFrame::new(0x581, &[0x60, 0x40, 0x60, 0x00, 0, 0, 0, 0]).unwrap();
+        let msg = parse_sdo_frame(&confirmation).expect("confirmation must parse");
+        let row = sdo_response_row(&msg).expect("a write confirmation belongs in the log");
+        assert_eq!(row[0], "0x6040:00");
+        assert_eq!(row[1], "Written (node 1)");
+    }
+
     #[test]
     fn a_fresh_ping_state_reports_nothing_sent() {
         let state = PingState::new();

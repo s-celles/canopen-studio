@@ -250,3 +250,59 @@ fn the_reported_engine_speed_tracks_the_simulated_motor() {
         reading.value
     );
 }
+
+#[test]
+fn an_sdo_download_is_confirmed_and_reads_back() {
+    let peer = Peer::connect(29772, 29773);
+
+    // Write 0x000F to the controlword 0x6040:00 of node 1.
+    let write =
+        canopen_core::sdo::build_sdo_write(1, 0x6040, 0, &0x000F_u16.to_le_bytes()).unwrap();
+    peer.bus.send(&write).expect("SDO download must go out");
+
+    let confirmation = peer
+        .wait_for(Duration::from_secs(5), |f| {
+            (f.id == 0x581 && f.payload().first() == Some(&0x60)).then(|| f.payload().to_vec())
+        })
+        .expect("no download response on 0x581");
+    assert_eq!(
+        &confirmation[1..4],
+        &[0x40, 0x60, 0x00],
+        "the confirmation echoes 0x6040:00"
+    );
+
+    // Reading the same object back must return what was written.
+    let read = canopen_core::sdo::build_sdo_read(1, 0x6040, 0).unwrap();
+    peer.bus.send(&read).expect("SDO upload must go out");
+
+    let value = peer
+        .wait_for(Duration::from_secs(5), |f| {
+            (f.id == 0x581 && f.payload().first() == Some(&0x4B)).then(|| f.payload().to_vec())
+        })
+        .expect("no 2-byte upload response on 0x581");
+    assert_eq!(
+        u16::from_le_bytes([value[4], value[5]]),
+        0x000F,
+        "the controlword reads back as it was written"
+    );
+}
+
+#[test]
+fn writing_a_read_only_object_is_aborted() {
+    let peer = Peer::connect(29774, 29775);
+
+    // 0x606C:00 is the velocity the simulated drive reports; it is not writable.
+    let write = canopen_core::sdo::build_sdo_write(1, 0x606C, 0, &1234_i32.to_le_bytes()).unwrap();
+    peer.bus.send(&write).expect("SDO download must go out");
+
+    let abort = peer
+        .wait_for(Duration::from_secs(5), |f| {
+            (f.id == 0x581 && f.payload().first() == Some(&0x80)).then(|| f.payload().to_vec())
+        })
+        .expect("no SDO abort on 0x581");
+    assert_eq!(
+        u32::from_le_bytes([abort[4], abort[5], abort[6], abort[7]]),
+        0x0601_0002,
+        "attempt to write a read-only object"
+    );
+}
