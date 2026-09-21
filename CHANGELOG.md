@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-21
+
 ### Added
 - **Reconstructed CAN waveforms for sigrok/PulseView (`crates/canopen-core/src/bitstream.rs`, `vcd.rs`)**: rebuilds the bit stream a decoded frame would have produced — SOF, arbitration, bit stuffing, CRC-15, delimiters, ACK slot, EOF — and writes it as VCD, which PulseView reads natively. Exposed to Python as `canopen_core.VcdWriter` and driven with `can-sniffer --vcd <path>`, with `--vcd-timing` (adapter timestamps or frames packed back to back), `--vcd-ack` and `--vcd-tick-ns`. Verified against sigrok-cli 0.7.2: 668 frames captured from the simulator decode back with the right identifiers and no CRC warnings.
   **The waveform is a reconstruction, not a measurement**, and says so where it cannot be missed: the channel is named `CAN_RX_RECONSTRUCTED`, the VCD header spells out that the ACK slot is an assumption, that errors and retransmissions are absent, that dropped frames leave no trace, and that the timing carries adapter accuracy. Frames sharing a timestamp are shifted apart so the wire never carries two at once, and the sniffer reports how many had to move.
