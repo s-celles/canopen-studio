@@ -5,6 +5,7 @@
  * License: GNU General Public License v3.0 (GPL-3.0-or-later)
  */
 
+pub mod bitstream;
 pub mod canopen;
 pub mod eds;
 pub mod frame;
@@ -21,7 +22,9 @@ pub mod simulator;
 pub mod simulator_ext;
 pub mod telemetry;
 pub mod udp;
+pub mod vcd;
 
+pub use bitstream::{AckSlot, crc15, frame_bits, stuff};
 pub use canopen::{CanopenMessageInfo, CanopenService, NmtState, decode_canopen_frame};
 pub use eds::{AccessType, DataType, DeviceInfo, EdsError, EdsFile, FileInfo, ObjectEntry};
 pub use frame::{CanError, CanFrame};
@@ -37,6 +40,7 @@ pub use sdo::{
 };
 pub use telemetry::{Cia402State, DriveTelemetry};
 pub use udp::{UdpBusError, UdpCanBus};
+pub use vcd::{Timing, VcdOptions, VcdWriter};
 
 /// Return library version string.
 pub fn version() -> &'static str {
