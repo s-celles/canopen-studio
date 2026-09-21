@@ -6,8 +6,8 @@
  */
 
 use canopen_core::{
-    CanFrame, LatencyTracker, UdpCanBus, decode_canopen_frame, decode_obd2_mode01_frame,
-    simulator_ext::spawn_udp_simulator,
+    CanFrame, LatencyTracker, PcapNgWriter, UdpCanBus, decode_canopen_frame,
+    decode_obd2_mode01_frame, simulator_ext::spawn_udp_simulator,
 };
 use clap::{Parser, Subcommand};
 use std::time::{Duration, Instant};
@@ -32,6 +32,10 @@ enum Commands {
         target_port: u16,
         #[arg(long)]
         compact: bool,
+        /// Also write the frames as PCAP-NG, for Wireshark. Give a file to
+        /// record to, or a named pipe to stream into a live capture.
+        #[arg(long, value_name = "FILE|PIPE")]
+        pcap: Option<String>,
     },
     /// Generate high-speed test CAN frames to benchmark throughput (frames/sec)
     BenchTx {
@@ -113,12 +117,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             target,
             target_port,
             compact,
+            pcap,
         } => {
             println!(
                 "==> Binding UDP CAN Bus on port {} (target: {}:{})...",
                 port, target, target_port
             );
             let bus = UdpCanBus::new(port, &target, target_port, compact)?;
+
+            // Opening a pipe blocks until Wireshark is on the other end, so
+            // say what the silence means before it starts.
+            let mut writer = match pcap.as_deref() {
+                Some(path) => {
+                    println!("==> Writing PCAP-NG to {path}");
+                    if canopen_core::pcap::sink_waits_for_reader(path) {
+                        println!("    (a pipe: this waits until a capture opens it)");
+                    }
+                    let sink = canopen_core::pcap::open_capture_sink(path)?;
+                    let w = PcapNgWriter::new(sink, "canopen-cli")?;
+                    println!("==> Capture open");
+                    Some(w)
+                }
+                None => None,
+            };
+
             println!("==> Listening for CAN frames (press Ctrl+C to exit)...");
 
             loop {
@@ -134,6 +156,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         println!("{} from {}{}", frame, src, extra);
+
+                        if let Some(w) = writer.as_mut()
+                            && let Err(e) = w.write_frame(&frame)
+                        {
+                            // A capture that has gone away is the normal way
+                            // this ends, not a failure worth a loud loop.
+                            eprintln!("==> Capture closed ({e}); continuing without it");
+                            writer = None;
+                        }
                     }
                     Err(e) => {
                         eprintln!("Receive error: {}", e);
