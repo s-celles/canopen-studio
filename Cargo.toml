@@ -23,3 +23,6 @@ socket2 = { version = "0.5", features = ["all"] }
 crossbeam-channel = "0.5"
 thiserror = "2.0"
 clap = { version = "4.5", features = ["derive"] }
+# default-features = false keeps libudev off the Linux build, so CI needs no
+# extra system package; port enumeration falls back to scanning /dev and /sys.
+serialport = { version = "4.7", default-features = false }

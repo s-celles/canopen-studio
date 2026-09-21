@@ -20,6 +20,7 @@ pub mod ring_buffer;
 pub mod sdo;
 pub mod simulator;
 pub mod simulator_ext;
+pub mod slcan;
 pub mod telemetry;
 pub mod udp;
 pub mod vcd;
