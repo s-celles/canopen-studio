@@ -14,10 +14,17 @@ demonstrations or for trying things out on any machine.
 import marimo
 
 __generated_with = "0.24.2"
+# Every cell below carries `hide_code=True`. Application mode hides the
+# code anyway; this is about the **editor**, which the platform opens on a
+# copy of this notebook in the user's own documents. Opening it on the
+# source puts the tool behind the code that draws it — someone who asked to
+# change one thing should meet the application first, then reveal the cell
+# they want. marimo keeps that toggle one click away, per cell.
+
 app = marimo.App(width="medium", app_title="CANopen Studio")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import time
     from collections import Counter
@@ -27,7 +34,7 @@ def _():
     return Counter, mo, time
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         """
@@ -41,7 +48,7 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     # python-can ships inside this application's archive; a clear message
     # beats an import traceback if the archive was incomplete.
@@ -67,7 +74,7 @@ def _(mo):
     return (can,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     interface = mo.ui.dropdown(
         options=["virtual", "pcan", "kvaser", "ixxat", "vector", "slcan", "socketcan"],
@@ -94,7 +101,7 @@ def _(mo):
     return bitrate, channel, count, interface, timeout
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     demo_button = mo.ui.run_button(label="📤 Émettre des trames de démonstration")
     capture_button = mo.ui.run_button(label="🎧 Capturer", kind="success")
@@ -102,7 +109,7 @@ def _(mo):
     return capture_button, demo_button
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(bitrate, can, channel, interface):
     def open_bus():
         """Open the configured bus; the caller closes it."""
@@ -114,7 +121,7 @@ def _(bitrate, can, channel, interface):
     return (open_bus,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(can, demo_button, mo, open_bus):
     mo.stop(not demo_button.value)
 
@@ -141,13 +148,13 @@ def _(can, demo_button, mo, open_bus):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     get_frames, set_frames = mo.state([])
     return get_frames, set_frames
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(capture_button, count, mo, open_bus, set_frames, time, timeout):
     mo.stop(not capture_button.value)
 
@@ -189,7 +196,7 @@ def _(capture_button, count, mo, open_bus, set_frames, time, timeout):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     # CANopen splits an 11-bit COB-ID into a function code and a node id.
     FUNCTIONS = [
@@ -236,7 +243,7 @@ def _():
     return (decode,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(decode, get_frames, mo):
     _frames = get_frames()
     mo.stop(not _frames, mo.md("_Aucune trame capturée pour l'instant._"))
@@ -260,7 +267,7 @@ def _(decode, get_frames, mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(Counter, decode, get_frames, mo):
     _frames = get_frames()
     mo.stop(not _frames)

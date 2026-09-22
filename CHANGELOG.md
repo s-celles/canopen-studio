@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-22
+
+### Changed
+- **The notebook opens in the editor with its code hidden** (`notebooks/canopen-studio.py`). The platform can open an application's notebook in the marimo editor, on a copy in the user's own documents; it opened on the source, so the tool sat behind the code that draws it. Every cell now carries `hide_code=True` — application mode hid the code already, this is about the editor, where marimo keeps the toggle one click away, per cell.
+- **`scripts/bundle_app.py` builds the notebook archive too**, with `--variant notebook`. How that archive was built lived nowhere: it was assembled by hand, which is how it came to carry libraries the platform provides. It now carries `canopen` and `python-can` and nothing else — the notebook plots with marimo's own elements, so it needs neither numpy nor matplotlib of its own.
+
 ## [0.8.0] - 2026-09-22
 
 ### Changed
