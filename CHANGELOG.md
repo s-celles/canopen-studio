@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-22
+
+### Changed
+- **The deployed archive stops carrying matplotlib** (`scripts/bundle_app.py`). Simple Apps Deployment 1.8.0 provides marimo, numpy, pandas and matplotlib to the applications it runs, and states that in its README as a promise rather than an accident. matplotlib and what it pulls accounted for 35 of the 38 MB this archive weighed, sent over the share once per installation and again at every update; it now weighs about 3 MB. The script also records how the archive is built, which until now lived nowhere: the studio is published as a `kind: python` application, so it carries `canopen`, `pyserial`, `python-can`, `msgpack` and `pyyaml`, and nothing the platform already holds. The floor is platform 1.8.0 — on an older one the archive arrives without matplotlib and dies on its first import. The trade, written down in that README: an application relying on the platform's libraries runs on the interpreter it ships, not on one the user picked with `--use-python` unless that one has them too.
+
 ### Fixed
 - `just sample N` never stopped after N frames: it passed its argument as `-c`, which
   `can-sniffer` reads as `--channel`, so the count went to the channel string and the

@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "canopen-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "canopen-core",
  "clap",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "canopen-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "crossbeam-channel",
  "pyo3",
@@ -695,7 +695,7 @@ dependencies = [
 
 [[package]]
 name = "canopen-gui"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "canopen-core",
  "slint",
