@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-22
+
+### Added
+- **SDO download in the Slint studio (`crates/canopen-gui/src/main.rs`, `ui/main.slint`)**: the SDO tab could only read. `canopen-core` already had `build_sdo_write()`; what was missing was somewhere to type the value and its encoding. The Download section offers the same five data types as the Python studio. Values are decimal unless prefixed `0x` — a deliberate divergence from the Python studio, which reads a bare `10` as sixteen, easy to type by accident and expensive to send to a drive.
+- **The virtual simulator answers writes (`crates/canopen-core/src/simulator.rs`)**: it only served uploads, so a download went unacknowledged and the button looked dead. It now confirms an expedited download, keeps the value so the object reads back, and aborts with `0x06010002` on the objects it serves from its own live state.
+- **`sniff --pcap <FILE|PIPE>` (`crates/canopen-cli/src/main.rs`)**: `pcap.rs` has written PCAP-NG with `LINKTYPE_CAN_SOCKETCAN` since the capture work landed, but no command exposed it. A plain path records a file; a named pipe joins a live Wireshark capture.
+- **`sniff --vcd <FILE>` and its four companions**: mirrors the Python sniffer's spellings, so a capture reads the same whichever front end wrote it. Both exports can run together — one capture, Wireshark for the protocol and PulseView for the waveform. `--vcd-bitrate` has no Python counterpart: the Python sniffer takes the rate from the adapter it opened, a UDP bus has none, and sigrok must be told the figure the waveform is drawn at.
+- **A Wireshark extcap (`crates/canopen-cli/src/extcap.rs`, `src/bin/canopen-extcap.rs`)**: Wireshark cannot capture CAN anywhere but Linux, SocketCAN being a kernel feature, so its interface list has nothing to offer on macOS and Windows. Dropped into Wireshark's extcap directory, `canopen-extcap` puts the studio's buses in that list. It advertises the UDP transport and the bundled simulator only — the two `canopen-core` can really open — rather than listing interfaces that cannot be captured from.
+- **The SLCAN serial transport (`crates/canopen-core/src/slcan.rs`)**: the core could only reach a bus over UDP. The LAWICEL ASCII codec and a serial transport over it bring in the CANUSB, USBtin and CANable adapters, until now reachable only from the Python studio. `serialport` is taken with `default-features = false`: its default pulls `libudev`, which the Linux CI does not install, so port enumeration falls back to scanning `/dev` and `/sys`.
+
+### Fixed
+- Debug prints that had slipped into the Slint RX loop.
+
+## [0.6.1] - 2026-09-22
+
+### Changed
+- **The MCP and A2A servers become an optional `servers` extra** (`pyproject.toml`): `fastmcp`, `a2a-sdk` and `fastapi[standard]` were hard dependencies, so every deployed copy carried `cryptography`, `pydantic-core`, `beartype`, `pygments` and the `google` namespace whether or not anything ever spoke to an agent. `gui.py` already imported both servers inside a `try`/`except ImportError` and ran with `_SERVERS_AVAILABLE = False` when they were missing, so the code was written for this from the start; only the dependency declaration disagreed. They stay in the dev group, so their tests keep running in CI, exactly as `cantools` does for the optional DBC importer. Measured on Python 3.13 with `uv pip install --target`: 188 MB on disk and 61.0 MB compressed with them, 99 MB and 33.4 MB without. That is what lets the analyser ship as a deployed Python application rather than a PyInstaller build carrying a Python of its own.
+
 ## [0.6.0] - 2026-09-21
 
 ### Added
