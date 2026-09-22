@@ -97,6 +97,28 @@ pub fn is_windows_named_pipe(path: &str) -> bool {
     path.starts_with(r"\\.\pipe\") || path.starts_with("//./pipe/")
 }
 
+/// Whether opening this destination will block until a capture reads it.
+///
+/// A named pipe is a rendezvous: on Windows the writer is the server and
+/// waits for Wireshark to connect, and on Unix opening a FIFO for writing
+/// waits for a reader by the same logic. A caller that prints progress wants
+/// to say so before it appears to hang. A path that does not exist yet is a
+/// file we are about to create, so it does not wait.
+pub fn sink_waits_for_reader(path: &str) -> bool {
+    if is_windows_named_pipe(path) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        std::fs::metadata(path).is_ok_and(|m| m.file_type().is_fifo())
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 /// Open the destination a capture should be written to.
 ///
 /// A plain path is a file we create. A Windows pipe path is not: Wireshark
@@ -436,5 +458,44 @@ mod tests {
         assert_eq!(body.len(), 4 + 4 + 4 + 4);
         assert_eq!(u16::from_le_bytes(body[10..12].try_into().unwrap()), 1);
         assert_eq!(&body[12..16], &[6, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_path_that_does_not_exist_yet_is_a_file_we_create() {
+        assert!(!sink_waits_for_reader("/tmp/no-such-capture-here.pcapng"));
+    }
+
+    #[test]
+    fn a_regular_file_does_not_wait_for_a_reader() {
+        let dir = std::env::temp_dir().join("canopen-pcap-sink-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("plain.pcapng");
+        std::fs::write(&path, b"").expect("the test file must be writable");
+        assert!(!sink_waits_for_reader(path.to_str().unwrap()));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_windows_named_pipe_waits_for_wireshark_to_connect() {
+        assert!(sink_waits_for_reader(r"\\.\pipe\canopen"));
+        assert!(sink_waits_for_reader("//./pipe/canopen"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_waits_for_a_reader() {
+        use std::process::Command;
+        let dir = std::env::temp_dir().join("canopen-pcap-fifo-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bus.fifo");
+        let _ = std::fs::remove_file(&path);
+        // mkfifo(3) is not in std, and the shell tool is always there.
+        let made = Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .is_ok_and(|s| s.success());
+        assert!(made, "mkfifo must create the test FIFO");
+        assert!(sink_waits_for_reader(path.to_str().unwrap()));
+        let _ = std::fs::remove_file(&path);
     }
 }

@@ -13,6 +13,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum CanError {
     #[error("Invalid CAN data length {0}: must be 0..=8 for classic CAN")]
     InvalidDlc(usize),
+    #[error("Invalid CAN identifier {0:#X}: wider than the frame format allows")]
+    InvalidId(u32),
     #[error("Failed to decode MessagePack CAN frame: {0}")]
     MsgpackDecodeError(String),
     #[error("Failed to encode MessagePack CAN frame: {0}")]

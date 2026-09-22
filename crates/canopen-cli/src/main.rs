@@ -5,12 +5,50 @@
  * License: GNU General Public License v3.0 (GPL-3.0-or-later)
  */
 
+use canopen_core::bitstream::AckSlot;
+use canopen_core::vcd::{Timing, VcdOptions, VcdWriter};
 use canopen_core::{
-    CanFrame, LatencyTracker, UdpCanBus, decode_canopen_frame, decode_obd2_mode01_frame,
-    simulator_ext::spawn_udp_simulator,
+    CanFrame, LatencyTracker, PcapNgWriter, UdpCanBus, decode_canopen_frame,
+    decode_obd2_mode01_frame, simulator_ext::spawn_udp_simulator,
 };
 use clap::{Parser, Subcommand};
 use std::time::{Duration, Instant};
+
+/// Where frames sit in the waveform. Mirrors the Python sniffer's
+/// --vcd-timing so a capture reads the same whichever front end made it.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum VcdTiming {
+    /// Keep the adapter's gaps, to its own accuracy.
+    Timestamps,
+    /// Pack frames back to back: the time axis stops meaning anything, the
+    /// bits become easy to read.
+    Packed,
+}
+
+/// How the ACK slot is drawn. Mirrors the Python sniffer's --vcd-ack.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum VcdAck {
+    Acknowledged,
+    Unanswered,
+}
+
+impl From<VcdTiming> for Timing {
+    fn from(t: VcdTiming) -> Self {
+        match t {
+            VcdTiming::Timestamps => Timing::Timestamps,
+            VcdTiming::Packed => Timing::Packed,
+        }
+    }
+}
+
+impl From<VcdAck> for AckSlot {
+    fn from(a: VcdAck) -> Self {
+        match a {
+            VcdAck::Acknowledged => AckSlot::Acknowledged,
+            VcdAck::Unanswered => AckSlot::Unanswered,
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "canopen-cli")]
@@ -32,6 +70,29 @@ enum Commands {
         target_port: u16,
         #[arg(long)]
         compact: bool,
+        /// Also write the frames as PCAP-NG, for Wireshark. Give a file to
+        /// record to, or a named pipe to stream into a live capture.
+        #[arg(long, value_name = "FILE|PIPE")]
+        pcap: Option<String>,
+        /// Also write a waveform as VCD, for sigrok and PulseView. It is
+        /// RECONSTRUCTED from the decoded frames: structure, stuffing and CRC
+        /// are exact, the ACK slot, errors and exact timing are not.
+        #[arg(long, value_name = "FILE")]
+        vcd: Option<String>,
+        /// Bit rate the waveform is drawn at. The sigrok `can` decoder has to
+        /// be told the same one or it reads nothing back.
+        #[arg(long, value_name = "BPS", default_value_t = 500_000)]
+        vcd_bitrate: u32,
+        /// Where frames sit in the waveform.
+        #[arg(long, value_enum, default_value_t = VcdTiming::Timestamps)]
+        vcd_timing: VcdTiming,
+        /// How to draw the ACK slot, which the adapter never reports.
+        #[arg(long, value_enum, default_value_t = VcdAck::Acknowledged)]
+        vcd_ack: VcdAck,
+        /// Waveform resolution in nanoseconds; it sets the samples per bit
+        /// (100 ns gives 20 at 500 kbit/s).
+        #[arg(long, value_name = "NS", default_value_t = 100)]
+        vcd_tick_ns: u32,
     },
     /// Generate high-speed test CAN frames to benchmark throughput (frames/sec)
     BenchTx {
@@ -113,12 +174,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             target,
             target_port,
             compact,
+            pcap,
+            vcd,
+            vcd_bitrate,
+            vcd_timing,
+            vcd_ack,
+            vcd_tick_ns,
         } => {
             println!(
                 "==> Binding UDP CAN Bus on port {} (target: {}:{})...",
                 port, target, target_port
             );
             let bus = UdpCanBus::new(port, &target, target_port, compact)?;
+
+            // Opening a pipe blocks until Wireshark is on the other end, so
+            // say what the silence means before it starts.
+            let mut writer = match pcap.as_deref() {
+                Some(path) => {
+                    println!("==> Writing PCAP-NG to {path}");
+                    if canopen_core::pcap::sink_waits_for_reader(path) {
+                        println!("    (a pipe: this waits until a capture opens it)");
+                    }
+                    let sink = canopen_core::pcap::open_capture_sink(path)?;
+                    let w = PcapNgWriter::new(sink, "canopen-cli")?;
+                    println!("==> Capture open");
+                    Some(w)
+                }
+                None => None,
+            };
+
+            // The waveform is computed, not observed, and a file outlives the
+            // command that wrote it — so say so here and let vcd.rs repeat it
+            // inside the file.
+            let mut waveform = match vcd.as_deref() {
+                Some(path) => {
+                    let options = VcdOptions {
+                        bitrate: vcd_bitrate,
+                        tick_ns: vcd_tick_ns,
+                        timing: vcd_timing.into(),
+                        ack: vcd_ack.into(),
+                    };
+                    println!("==> Writing VCD waveform to {path}");
+                    println!("    RECONSTRUCTED from decoded frames, not measured. Structure,");
+                    println!(
+                        "    stuffing and CRC are exact; ACK, errors and exact timing are not."
+                    );
+                    println!(
+                        "    Decode it with sigrok's 'can' decoder at {} kbit/s.",
+                        vcd_bitrate / 1000
+                    );
+                    let file = std::fs::File::create(path)?;
+                    Some(VcdWriter::new(file, options)?)
+                }
+                None => None,
+            };
+
             println!("==> Listening for CAN frames (press Ctrl+C to exit)...");
 
             loop {
@@ -134,6 +244,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         };
 
                         println!("{} from {}{}", frame, src, extra);
+
+                        if let Some(w) = writer.as_mut()
+                            && let Err(e) = w.write_frame(&frame)
+                        {
+                            // A capture that has gone away is the normal way
+                            // this ends, not a failure worth a loud loop.
+                            eprintln!("==> Capture closed ({e}); continuing without it");
+                            writer = None;
+                        }
+
+                        // Ctrl+C ends this command, so finish() never runs and
+                        // the file keeps no closing timestamp. Nothing is lost:
+                        // the sink is unbuffered, so every transition is already
+                        // on disk and the last one ends the waveform.
+                        if let Some(w) = waveform.as_mut()
+                            && let Err(e) = w.write_frame(&frame)
+                        {
+                            eprintln!("==> Waveform closed ({e}); continuing without it");
+                            waveform = None;
+                        }
                     }
                     Err(e) => {
                         eprintln!("Receive error: {}", e);
@@ -372,4 +502,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[allow(unreachable_code)]
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::ValueEnum;
+
+    /// The Python sniffer takes these same words. A capture has to read the
+    /// same whichever front end wrote it, so the spellings cannot drift.
+    #[test]
+    fn the_waveform_options_are_spelled_as_the_python_sniffer_spells_them() {
+        let timings: Vec<String> = VcdTiming::value_variants()
+            .iter()
+            .filter_map(|v| v.to_possible_value().map(|p| p.get_name().to_string()))
+            .collect();
+        assert_eq!(timings, vec!["timestamps", "packed"]);
+
+        let acks: Vec<String> = VcdAck::value_variants()
+            .iter()
+            .filter_map(|v| v.to_possible_value().map(|p| p.get_name().to_string()))
+            .collect();
+        assert_eq!(acks, vec!["acknowledged", "unanswered"]);
+    }
+
+    #[test]
+    fn every_waveform_option_maps_to_the_core_value_it_names() {
+        assert_eq!(Timing::from(VcdTiming::Timestamps), Timing::Timestamps);
+        assert_eq!(Timing::from(VcdTiming::Packed), Timing::Packed);
+        assert_eq!(AckSlot::from(VcdAck::Acknowledged), AckSlot::Acknowledged);
+        assert_eq!(AckSlot::from(VcdAck::Unanswered), AckSlot::Unanswered);
+    }
 }

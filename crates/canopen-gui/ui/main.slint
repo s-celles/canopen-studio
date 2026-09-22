@@ -43,6 +43,8 @@ export component MainWindow inherits Window {
     in-out property <bool> sdo_status_is_error: false;
     in-out property <[[StandardListViewItem]]> sdo_log_model: [];
     callback sdo-read(string, string, string);
+    // node, index, sub, value, data type — all raw text, parsed in Rust.
+    callback sdo-write(string, string, string, string, string);
     callback sdo-clear();
 
     // Hardware diagnostics: link description, SYNC jitter and ping RTT.
@@ -452,13 +454,45 @@ export component MainWindow inherits Window {
                         Button { text: "Clear"; clicked => { root.sdo-clear(); } }
                     }
 
+                    Rectangle { height: 1px; background: Palette.border; }
+
+                    Text { text: "SDO Download (Expedited Write)"; font-size: 16px; font-weight: 700; color: Palette.foreground; }
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: start;
+                        // The object written is the one addressed above, so the
+                        // node, index and sub-index fields are not repeated here.
+                        Text { text: "Value:"; vertical-alignment: center; color: Palette.foreground; }
+                        sdo-value := LineEdit {
+                            text: "0";
+                            width: 120px;
+                            // Decimal unless prefixed 0x, which the placeholder says.
+                            placeholder-text: "1500 or 0x05DC";
+                            accepted => { root.sdo-write(sdo-node.text, sdo-index.text, sdo-sub.text, sdo-value.text, sdo-type.current-value); }
+                        }
+                        Text { text: "Type:"; vertical-alignment: center; color: Palette.foreground; }
+                        sdo-type := ComboBox {
+                            model: ["uint8 (1 byte)", "uint16 (2 bytes)", "uint32 (4 bytes)", "int16 (2 bytes)", "int32 (4 bytes)"];
+                            current-index: 1;
+                            width: 150px;
+                        }
+                        Button {
+                            text: "Write";
+                            clicked => { root.sdo-write(sdo-node.text, sdo-index.text, sdo-sub.text, sdo-value.text, sdo-type.current-value); }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: Palette.border; }
+
                     Text { text: "Common objects (CiA 301)"; font-size: 12px; color: Palette.foreground; }
                     HorizontalLayout {
                         spacing: 8px;
                         alignment: start;
                         Button { text: "0x1000 Device Type"; clicked => { sdo-index.text = "0x1000"; sdo-sub.text = "0"; root.sdo-read(sdo-node.text, "0x1000", "0"); } }
+                        Button { text: "0x1001 Error Register"; clicked => { sdo-index.text = "0x1001"; sdo-sub.text = "0"; root.sdo-read(sdo-node.text, "0x1001", "0"); } }
                         Button { text: "0x1008 Device Name"; clicked => { sdo-index.text = "0x1008"; sdo-sub.text = "0"; root.sdo-read(sdo-node.text, "0x1008", "0"); } }
                         Button { text: "0x1018 Identity"; clicked => { sdo-index.text = "0x1018"; sdo-sub.text = "1"; root.sdo-read(sdo-node.text, "0x1018", "1"); } }
+                        Button { text: "0x6041 Statusword"; clicked => { sdo-index.text = "0x6041"; sdo-sub.text = "0"; root.sdo-read(sdo-node.text, "0x6041", "0"); } }
                         Button { text: "0x606C Velocity"; clicked => { sdo-index.text = "0x606C"; sdo-sub.text = "0"; root.sdo-read(sdo-node.text, "0x606C", "0"); } }
                     }
 
