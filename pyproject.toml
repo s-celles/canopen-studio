@@ -34,6 +34,12 @@ servers = [
     "fastapi[standard]>=0.115",
 ]
 
+[tool.uv.sources]
+# Not on PyPI — the repository is private — so naming the source is what lets
+# `uv pip install --group dev` resolve it. uv's own field: other tools ignore
+# it, and it appears in nothing built from this project.
+simple-apps-deployment = { git = "https://github.com/s-celles/simple-apps-deployment.git" }
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
@@ -44,6 +50,11 @@ dev = [
     "pre-commit>=3.8.0",
     # Exercises the optional DBC importer in CI; the package itself does not need it.
     "cantools>=39.0",
+    # The publishing tool, used by `scripts/bundle_app.py` and by nothing the
+    # studio runs: the deployed application never imports the platform, it is
+    # merely started by it. A floor of 1.8.0 because that is the release whose
+    # `lib/` the archive now relies on for matplotlib.
+    "simple-apps-deployment>=1.8",
     # Same reason: the MCP and A2A servers moved to the `servers` extra, and their
     # tests must still run. A deployed copy leaves them out.
     "fastmcp>=2.0",
