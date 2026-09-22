@@ -3,8 +3,16 @@
 Two of the three variants offered through Simple Apps Deployment are built
 here; the third, the native Slint studio, comes from the release workflow.
 
-    python scripts/bundle_app.py --catalog \\\\server\\share\\bin\\apps
-    python scripts/bundle_app.py --catalog ... --variant notebook
+    uv run --with git+https://github.com/s-celles/simple-apps-deployment.git \\
+        scripts/bundle_app.py --catalog \\\\server\\share\\bin\\apps
+    uv run --with git+... scripts/bundle_app.py --catalog ... --variant notebook
+
+Publishing shells out to `simple_apps_deployment.publish`, so that package has
+to be importable by the interpreter running this script — hence `--with`. It is
+deliberately not a project dependency: the repository is private, and uv
+resolves every dependency group when it locks, whichever one it is declared in,
+so a single entry anywhere in `pyproject.toml` fails every CI job on every
+platform before a test runs. Nothing but this script needs it.
 
 Nothing here is specific to a machine or a share: the catalogue is given on
 the command line and the metadata comes from the project.
