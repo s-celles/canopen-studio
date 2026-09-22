@@ -8,8 +8,8 @@ CAN & CANopen Studio includes an integrated update client for checking, download
 
 - **Non-blocking Startup**: On launch, the application checks `https://api.github.com/repos/s-celles/canopen-studio/releases/latest` in a lightweight daemon thread.
 - **Visual Alert**: If a newer release is detected, the status bar at the bottom displays:
-  `CANopen Studio v0.2.1 — ⚡ New release v0.3.0 available!`
-  alongside a direct `[🚀 Update to v0.3.0]` action button.
+  `CANopen Studio v0.5.0 — ⚡ New release v0.6.0 available!`
+  alongside a direct `[🚀 Update to v0.6.0]` action button.
 
 ---
 

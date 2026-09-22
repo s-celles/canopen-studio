@@ -5,6 +5,15 @@ CAN & CANopen Studio exposes its bus to AI agents through two protocol servers.
 **MCP starts with the GUI. A2A does not** — it is opt-in, for the reasons in
 [Why A2A is opt-in](#why-a2a-is-opt-in).
 
+Since 0.6.1 both servers are an optional `servers` extra rather than a hard dependency:
+they are the heavy half of an installation — 61 MB compressed against 33 MB without them —
+and a bench does not need an agent. Where they are absent the studio imports them inside a
+`try`/`except ImportError`, runs with `_SERVERS_AVAILABLE = False`, and starts neither.
+
+A development checkout has them anyway: they are in the `dev` group, so `uv sync` installs
+them and their tests keep running in CI. An installed copy needs the extra —
+`pip install canopen-studio[servers]`, or `uv sync --extra servers`.
+
 ```bash
 uv run canopen-studio                          # MCP only
 CANOPEN_STUDIO_A2A=1 uv run canopen-studio     # MCP + A2A
@@ -60,8 +69,15 @@ Standalone mode has no GUI capture loop, so the bridge tools are unavailable the
 | `send_nmt(command, node_id)` | `start`, `stop`, `pre_operational`, `reset_node`, `reset_communication` |
 | `send_sync()` | One SYNC pulse (`0x080`) |
 | `sdo_read(node_id, index, subindex)` | Expedited SDO read; the reply appears in `get_trace()` |
+| `get_latency_stats()` | Current RTT (min/avg/max) and SYNC jitter statistics |
+| `ping_bus(timeout)` | Send a CAN ping (`0x7E0`) and measure the round-trip time |
 | `bridge_start(channel, hop_limit, allow_inject)` | Mirror the captured bus onto a multicast group |
 | `bridge_stop()` | Stop mirroring, leaving the bus connected |
+
+Ten further `obd_*` tools sit on the same server — one process, one port, one set of
+guards — for vehicle diagnostics. Nine of them read; `obd_clear_dtcs` can change the
+vehicle and passes a gate of its own. They are documented with the rest of the
+diagnostics in [OBD-II Vehicle Diagnostics](obd.md#mcp-tool-reference).
 
 ### A typical session
 

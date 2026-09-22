@@ -84,7 +84,7 @@ listen-only:
 
 # Capture a fixed number of frames and stop (e.g. just sample 50)
 sample count="20":
-    uv run can-sniffer -c {{count}}
+    uv run can-sniffer -n {{count}}
 
 # Run the OBD-II integration tests against Ircama's ELM327 emulator (installed on demand)
 test-emulator:

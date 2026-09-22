@@ -124,6 +124,49 @@ OBD-II and UDS diagnostics carried over ISO-TP.
 
 ---
 
+## Capturing from Wireshark itself (extcap)
+
+The pipe above works, but it puts the studio first and Wireshark second. An
+**extcap** turns that around: `canopen-extcap`, added in 0.7.0, puts the
+studio's buses in Wireshark's own interface list, where you start a capture by
+double-clicking one.
+
+This matters most away from Linux. Wireshark can only capture CAN through
+SocketCAN, a kernel feature, so on macOS and Windows its list has nothing CAN to
+offer at all.
+
+Build it and drop it in:
+
+```bash
+cargo build --release -p canopen-cli --bin canopen-extcap
+```
+
+Wireshark's own **Help → About Wireshark → Folders** names the directory to copy
+the binary into — the *Personal Extcap path*, usually:
+
+| Platform | Personal extcap directory |
+| :--- | :--- |
+| Windows | `%APPDATA%\Wireshark\extcap\` |
+| macOS, Linux | `~/.config/wireshark/extcap/` |
+
+Restart Wireshark, or refresh the interface list, and two entries appear:
+
+| Interface | What it captures |
+| :--- | :--- |
+| **CANopen Studio: CAN over UDP (network bridge)** | The UDP transport — a studio bridging a real bus, or another machine on the group. Its gear icon sets the listen port, peer address and peer port (`1750`, `127.0.0.1`, `1750` by default) |
+| **CANopen Studio: virtual simulator (demo bus)** | The bundled simulator on a loopback pair, for a bus with no hardware and nothing else running |
+
+Only those two are advertised, because they are the two `canopen-core` can
+really open. The serial and SocketCAN backends live in the Python studio and
+have no Rust equivalent yet; listing them here would put entries in Wireshark's
+list that cannot be captured from.
+
+The frames arrive with the same `LINKTYPE_CAN_SOCKETCAN` encapsulation as a
+capture file, so [Decode As](#decoding-frames-as-canopen) and the
+[display filters](#useful-display-filters) apply unchanged.
+
+---
+
 ## From your own code
 
 The writer lives in the Rust core and is exposed to Python, so any script can

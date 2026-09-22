@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `just sample N` never stopped after N frames: it passed its argument as `-c`, which
+  `can-sniffer` reads as `--channel`, so the count went to the channel string and the
+  capture ran until interrupted. It now passes `-n`.
+
+### Documentation
+- The published site trailed the code by two releases. The 0.5.0 Rust engine, the native
+  front end and `canopen-cli` appeared nowhere in it, and `ROADMAP.md`, `benchmarks.md`
+  and `CHANGELOG.md` were reachable only from the README on GitHub. Added
+  `architecture.md`, `rust_core.md` and `cli.md`, covering the engine through 0.7.0 — the
+  SLCAN serial transport, the PCAP-NG and VCD exports, the Wireshark extcap — and
+  published the three root documents as site pages through `pymdownx.snippets`, so they
+  keep one source of truth.
+- Corrected what had drifted: `installation.md` described a shortcut to `can_gui.py` and
+  linked `release.yml` through an absolute `file:///` path left over from an old checkout;
+  it now covers the macOS and Linux release assets, the `just rust-python` step and what
+  happens without it, and the `servers` extra the agent servers moved into in 0.6.1.
+  `quickstart.md` showed `just sniff 250000`, which passes a bitrate where the recipe
+  expects an interface. `hardware.md` still launched `can_gui.py`. The MCP tool table in
+  `ai_integration.md` was missing `get_latency_stats`, `ping_bus` and the ten `obd_*`
+  tools.
+- `index.md` and `README.md` list the OBD-II diagnostics, the bridge, the native engine
+  and the capture exports, and the release assets are named by version rather than pinned
+  at v0.2.1.
+- The animated captures added with the Rust port are now shown in the gallery.
+- `wireshark.md` predates the extcap, which shipped in 0.7.0 with no user-facing page at
+  all: added how to build `canopen-extcap`, where Wireshark looks for it on each platform,
+  the two interfaces it advertises and why only those two.
+
 ## [0.7.0] - 2026-09-22
 
 ### Added

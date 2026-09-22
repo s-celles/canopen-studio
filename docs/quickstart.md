@@ -9,8 +9,9 @@ Get started with **CAN & CANopen Studio** in less than 2 minutes.
 1. Connect your USB-to-CAN converter (e.g. Lawicel CANUSB, PEAK PCAN-USB, CANable).
 2. Start the graphical studio:
    ```bash
-   just gui
-   # or via installed shortcut or executable
+   just gui          # the Python studio
+   just rust-gui     # or the native front end, same engine
+   # or via the installed shortcut or the standalone executable
    ```
 3. In the top toolbar:
    - Select your adapter under **Interface** (e.g., `SLCAN` or `PEAK-System PCAN`).
@@ -43,11 +44,11 @@ If you prefer working in a headless console or shell:
 # Sniff traffic on default SLCAN adapter at 500 kbps
 just sniff
 
-# Sniff at 250 kbps
-just sniff 250000
+# Sniff at 250 kbps — the recipe takes the interface first, then the bitrate
+just sniff slcan 250000
 
-# Run in virtual simulation mode
-just simulate
+# Run in virtual simulation mode for 10 seconds
+just simulate 10
 
 # Launch real-time console dashboard (RPM, Temperatures, Status)
 just dashboard
@@ -58,3 +59,32 @@ just filter 0x473
 # Record frames to a CSV file
 just record capture_log.csv
 ```
+
+Every option is listed in [Command-Line Tools](cli.md).
+
+---
+
+## 4. A Virtual Bus Without a Window
+
+The native CLI runs the same simulated nodes headlessly over UDP, which gives the
+command-line tools and the native front end a bus to work against with no hardware and no
+window open:
+
+```bash
+just rust-simulate 1750 0     # transmit to port 1750, run until interrupted
+```
+
+Anything speaking the same UDP transport can then listen — `canopen-cli sniff --port 1750`
+in another terminal, or the benchmark commands in [Command-Line Tools](cli.md).
+
+To share a bus between **machines** rather than processes, use the UDP multicast
+interface of the studio itself, described in [Hardware & Interfaces](hardware.md).
+
+---
+
+## 5. Diagnosing a Vehicle
+
+Plug an ELM327 into the OBD-II socket, or wire a native CAN adapter to pins 6 and 14,
+then open the **🩺 OBD-II Diagnostics** tab. The full procedure — adapter setup,
+supported-PID discovery, trouble codes, VIN, and the safety gates around writing — is in
+[OBD-II Vehicle Diagnostics](obd.md).

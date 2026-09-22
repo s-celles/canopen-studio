@@ -2,7 +2,7 @@
 
 This document records the baseline performance metrics, Round-Trip Time (CAN Ping / Pong latency), and cyclic frame jitter of CANopen Studio implemented in **Python 3.13**, and their Rust equivalents.
 
-These measurements serve as the reference baseline to quantify performance improvements achieved through future optimizations or full/partial rewrites in compiled systems languages (**Rust**, **C++**, **Go**). See the [Development Roadmap](ROADMAP.md) for architectural plans.
+These measurements serve as the reference baseline to quantify performance improvements achieved through future optimizations or full/partial rewrites in compiled systems languages (**Rust**, **C++**, **Go**). See the [Development Roadmap](https://s-celles.github.io/canopen-studio/roadmap/) for architectural plans.
 
 ---
 
@@ -92,7 +92,7 @@ The Linux machine generated a dense, continuous simulated CANopen stream:
 
 ## 3. Latency Measurement Protocol (CAN Ping / Pong)
 
-Round-Trip Time (RTT) is measured directly at the CAN application layer via the [`LatencyTracker`](src/canopen_studio/latency.py) module:
+Round-Trip Time (RTT) is measured directly at the CAN application layer via the [`LatencyTracker`](https://github.com/s-celles/canopen-studio/blob/main/src/canopen_studio/latency.py) module:
 1. **Ping Request Frame (`0x7E0`)**: Contains an incrementing 32-bit sequence number and high-resolution timestamp fraction (`time.perf_counter()`).
 2. **Auto-Echo Responder (`0x7E1`)**: Any listening node receiving `0x7E0` immediately replies with ID `0x7E1` echoing identical payload (frames originating from the same node looped back locally are automatically ignored).
 3. **RTT Calculation**: Computed immediately upon receiving `0x7E1` using a monotonic clock differential, requiring zero NTP clock synchronization between machines.
