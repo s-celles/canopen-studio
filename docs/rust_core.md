@@ -3,7 +3,9 @@
 Since **0.5.0** the protocol work lives in a compiled Rust engine, `canopen-core`. The
 graphical studio, the command-line tools and the native front end all drive the same
 engine: frame parsing, CANopen classification, ISO-TP reassembly and the virtual
-simulator run as native code rather than in the Python interpreter.
+simulator run as native code rather than in the Python interpreter. 0.6.0 added the
+PCAP-NG and VCD exports on top of it, and 0.7.0 the SLCAN serial transport — so the core
+now reaches a real adapter, not only a UDP bus.
 
 You do not have to think about any of this if you installed a **released build** — the
 installers and portable archives ship the compiled extension. It matters when you run
@@ -70,6 +72,8 @@ from canopen_studio import canopen_core
 | `NmtMaster` | NMT command synthesis, node state tracking, heartbeat timeout detection |
 | `EdsFile` | CiA 306 EDS parsing, and `PdoMapping` synthesis from mapping records |
 | `VirtualCanopenSimulator` | The native simulator loop |
+| `PcapNgWriter` | PCAP-NG capture with `LINKTYPE_CAN_SOCKETCAN`, behind `can-sniffer --pcap` — see [Wireshark Integration](wireshark.md) |
+| `VcdWriter` | The reconstructed waveform, behind `can-sniffer --vcd` — see [Logic Analyzer & Signals](logic_analyzer.md) |
 | `decode_canopen`, `decode_canopen_message`, `decode_obd2` | Frame classification and decoding |
 | `build_sdo_read`, `build_sdo_write`, `build_sdo_abort`, `decode_sdo` | SDO request and response handling |
 

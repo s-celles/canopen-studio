@@ -5,6 +5,15 @@ CAN & CANopen Studio exposes its bus to AI agents through two protocol servers.
 **MCP starts with the GUI. A2A does not** — it is opt-in, for the reasons in
 [Why A2A is opt-in](#why-a2a-is-opt-in).
 
+Since 0.6.1 both servers are an optional `servers` extra rather than a hard dependency:
+they are the heavy half of an installation — 61 MB compressed against 33 MB without them —
+and a bench does not need an agent. Where they are absent the studio imports them inside a
+`try`/`except ImportError`, runs with `_SERVERS_AVAILABLE = False`, and starts neither.
+
+A development checkout has them anyway: they are in the `dev` group, so `uv sync` installs
+them and their tests keep running in CI. An installed copy needs the extra —
+`pip install canopen-studio[servers]`, or `uv sync --extra servers`.
+
 ```bash
 uv run canopen-studio                          # MCP only
 CANOPEN_STUDIO_A2A=1 uv run canopen-studio     # MCP + A2A

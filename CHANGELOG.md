@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the capture exports, and the release assets are named by version rather than pinned
   at v0.2.1.
 - The animated captures added with the Rust port are now shown in the gallery.
+- `wireshark.md` predates the extcap, which shipped in 0.7.0 with no user-facing page at
+  all: added how to build `canopen-extcap`, where Wireshark looks for it on each platform,
+  the two interfaces it advertises and why only those two.
 
 ## [0.7.0] - 2026-09-22
 

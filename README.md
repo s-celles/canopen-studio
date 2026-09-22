@@ -21,6 +21,7 @@
 - **Full Transmission Console**: Generic NMT Master (Start/Stop/Reset), 50 Hz SYNC clock generator, and frame templates library.
 - **SDO Explorer**: Expedited dictionary reader & writer for node inspection.
 - **Native Rust Engine**: Frame parsing, CANopen classification, ISO-TP reassembly and the virtual simulator run as compiled code, shared by the Python studio, the native front end and the CLI.
+- **Wireshark & PulseView Export**: PCAP-NG capture (file or live named pipe, read natively by Wireshark's CANopen / J1939 / ISO 15765 dissectors) and a reconstructed VCD waveform for sigrok.
 - **Real Bus Network Bridge**: Mirror a physical CAN bus onto a UDP multicast group so remote machines observe the live traffic as if they were wired to it.
 - **AI Agent Integration**: MCP and A2A servers expose the bus to an agent — read the trace, inspect nodes, transmit frames, drive the NMT state machine.
 - **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle, never assumed; declarative vehicle profiles with inheritance; read-only by default.
@@ -92,6 +93,7 @@ Detailed documentation, architecture guides, decoder tutorials, and screenshots 
 | [Architecture](https://s-celles.github.io/canopen-studio/architecture/) | One engine, two front ends |
 | [Native Engine](https://s-celles.github.io/canopen-studio/rust_core/) | What the Rust core accelerates, and how to build it |
 | [Command-Line Tools](https://s-celles.github.io/canopen-studio/cli/) | `can-sniffer` and `canopen-cli` |
+| [Wireshark](https://s-celles.github.io/canopen-studio/wireshark/) | Capture files, live pipes, dissectors and filters |
 | [OBD-II Diagnostics](https://s-celles.github.io/canopen-studio/obd/) | Vehicle diagnostics over ELM327 or native CAN |
 | [AI Integration](https://s-celles.github.io/canopen-studio/ai_integration/) | MCP and A2A |
 

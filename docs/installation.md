@@ -64,14 +64,25 @@ native core and the OBD-II tab.
 ### Via `uv tool`
 ```bash
 uv tool install git+https://github.com/s-celles/canopen-studio.git
+
+# With the MCP and A2A servers, which are an optional extra since 0.6.1
+uv tool install "canopen-studio[servers] @ git+https://github.com/s-celles/canopen-studio.git"
 ```
 Then invoke the tools directly from any terminal:
 ```bash
 canopen-studio          # Launches the graphical studio
 can-sniffer --help      # Command-line protocol sniffer
-canopen-mcp             # MCP server, standalone
-canopen-a2a             # A2A server, standalone (also needs CANOPEN_STUDIO_A2A=1)
+canopen-mcp             # MCP server, standalone       ] the [servers] extra
+canopen-a2a             # A2A server, standalone       ]
 ```
+
+!!! note "The agent servers are optional"
+    `fastmcp`, `a2a-sdk` and `fastapi[standard]` together pull in `cryptography`,
+    `pydantic-core`, `beartype`, `pygments` and the `google` namespace — 61 MB compressed
+    against 33 MB without them. The studio runs without them and simply starts no server,
+    so the extra is worth installing only when an agent will actually connect. See
+    [AI Integration](ai_integration.md). A development checkout gets them from the `dev`
+    group regardless.
 
 !!! warning "No compiled engine this way"
     A wheel built from source by `uv tool` or `pip` carries the Python code only: the
@@ -84,7 +95,7 @@ canopen-a2a             # A2A server, standalone (also needs CANOPEN_STUDIO_A2A=
 ```bash
 git clone https://github.com/s-celles/canopen-studio.git
 cd canopen-studio
-pip install -e .
+pip install -e .                  # add [servers] for MCP/A2A, [dbc] for DBC import
 ```
 
 ---
@@ -122,7 +133,13 @@ The Rust workspace builds and tests on its own:
 just rust-build     # cargo build --workspace
 just rust-test      # cargo test --workspace
 just rust-gui       # the native Slint front end
+just rust-release   # release build with its dependency list embedded, for an SBOM
+just rust-audit     # check that embedded list against RustSec
 ```
+
+`rust-release` uses `cargo auditable`: a stripped Rust binary names none of its crates, so
+an SBOM taken from the published archive comes back empty and "no vulnerabilities" would
+mean nothing. Install the tools once with `cargo install cargo-auditable cargo-audit`.
 
 ---
 

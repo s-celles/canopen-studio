@@ -10,14 +10,14 @@ identically, and why some features are noticeably faster than others.
 ## The shape of the project
 
 ```
-                  crates/canopen-core   (Rust: frames, CiA 301/402, OBD-II, transport)
-                            |
+                  crates/canopen-core   (Rust: frames, CiA 301/402, OBD-II,
+                            |            SLCAN + UDP transport, PCAP, VCD)
             +---------------+----------------+
             |               |                |
       pyo3_bindings    canopen-gui      canopen-cli
             |            (Slint)        (sniff, simulate, bench)
-    src/canopen_studio
-      (Tkinter studio,
+    src/canopen_studio                  canopen-extcap
+      (Tkinter studio,                  (Wireshark plugin)
        MCP / A2A servers)
 ```
 
@@ -25,7 +25,7 @@ identically, and why some features are noticeably faster than others.
 |---|---|
 | `src/canopen_studio/` | The Python package: the Tkinter studio (`gui.py`), the command-line sniffer, the MCP and A2A servers, OBD-II diagnostics (`diag/`) and the protocol decoders (`stack/`) |
 | `crates/canopen-core/` | The Rust engine: frames, SDO, NMT, PDO, EDS, ISO-TP, OBD-II, telemetry, UDP transport, the virtual simulator, and the PyO3 bindings |
-| `crates/canopen-cli/` | The Rust command-line tool: sniff, simulate, echo, benchmarks |
+| `crates/canopen-cli/` | The Rust command-line tools: `canopen-cli` (sniff, simulate, echo, benchmarks) and `canopen-extcap`, the Wireshark capture plugin |
 | `crates/canopen-gui/` | The native front end, built with [Slint](https://slint.dev) |
 
 ---
@@ -51,9 +51,14 @@ construction rather than by convention.
 | `latency.rs` | `LatencyTracker` and the CAN ping helpers on `0x7E0` / `0x7E1` |
 | `ring_buffer.rs` | Bounded trace storage |
 | `udp.rs` | `UdpCanBus`, the transport shared by both front ends and the CLI |
+| `slcan.rs` | The LAWICEL ASCII codec and a serial transport over it — CANUSB, USBtin, CANable |
+| `pcap.rs` | PCAP-NG writing with `LINKTYPE_CAN_SOCKETCAN`, to a file or a named pipe |
+| `bitstream.rs`, `vcd.rs` | Rebuilds the bit stream a frame would have produced — stuffing, CRC-15, delimiters — and writes it as VCD for sigrok and PulseView |
 | `simulator.rs`, `simulator_ext.rs` | The virtual device loop — periodic traffic, and answers to NMT, SDO, ping and OBD-II — and its UDP wiring |
 
-See [Native Engine & Front End](rust_core.md) for how it is built and what it accelerates.
+See [Native Engine & Front End](rust_core.md) for how it is built and what it accelerates,
+and [Wireshark Integration](wireshark.md) and [Logic Analyzer & Signals](logic_analyzer.md)
+for what the two exports are for.
 
 ---
 

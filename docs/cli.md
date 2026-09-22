@@ -36,6 +36,25 @@ uv run can-sniffer -I virtual --simulate -t 10
 | `-t`, `--duration` | Stop after N seconds |
 | `--dashboard` | Interactive console dashboard (RPM, temperatures, torque, node states) |
 | `--simulate` | Start the virtual nodes and emit synthetic traffic |
+| `--pcap` | Also write a PCAP-NG capture for Wireshark — a file, or a named pipe for a live capture |
+| `--vcd` | Also write a reconstructed VCD waveform for sigrok and PulseView |
+| `--vcd-timing` | `timestamps` (the adapter's gaps, to its own accuracy) or `packed` (frames back to back) |
+| `--vcd-ack` | `acknowledged` or `unanswered` — the adapter never reports the ACK slot |
+| `--vcd-tick-ns` | Waveform resolution in nanoseconds; 100 gives 20 samples per bit at 500 kbit/s |
+
+The two exports run together — one capture, Wireshark for the protocol and PulseView for
+the waveform:
+
+```bash
+uv run can-sniffer -I slcan --pcap capture.pcapng --vcd capture.vcd
+```
+
+!!! warning "The waveform is reconstructed, not measured"
+    `--vcd` rebuilds the bit stream a decoded frame *would* have produced. Structure,
+    stuffing and CRC are exact; the ACK slot is an assumption, errors and retransmissions
+    are absent, and the timing carries the adapter's accuracy. The file says so in its own
+    header. [Logic Analyzer & Signals](logic_analyzer.md) covers measuring the wire for
+    real.
 
 The `just` recipes wrap the common combinations:
 
@@ -79,7 +98,19 @@ cargo run --release --bin canopen-cli -- sniff --port 1750
 ```
 
 Prints every frame with its CANopen meaning, and its OBD-II Mode 01 reading when the
-frame carries one.
+frame carries one. It takes the same two exports as the Python sniffer, spelled the same
+way, so a capture reads identically whichever front end wrote it:
+
+| Option | Meaning |
+|---|---|
+| `--pcap <FILE\|PIPE>` | PCAP-NG for Wireshark; a pipe blocks until a capture opens it |
+| `--vcd <FILE>` | The reconstructed waveform |
+| `--vcd-bitrate <BPS>` | Rate the waveform is drawn at (default `500000`) |
+| `--vcd-timing`, `--vcd-ack`, `--vcd-tick-ns` | As in the Python sniffer |
+
+`--vcd-bitrate` has no Python counterpart, and needs one here: the Python sniffer takes
+the rate from the adapter it opened, a UDP bus has none, and sigrok's `can` decoder has to
+be told the same figure or it reads nothing back.
 
 ### `simulate` — a headless virtual bus
 
@@ -125,6 +156,23 @@ just rust-bench-tx 200000
 ```
 
 Generates N frames as fast as the transport allows and reports frames per second.
+
+---
+
+## `canopen-extcap` — the Wireshark plugin
+
+Wireshark can only capture CAN on Linux, SocketCAN being a kernel feature, so its
+interface list has nothing to offer on macOS and Windows. Dropped into Wireshark's extcap
+directory, the `canopen-extcap` binary puts the studio's buses in that list instead.
+
+```bash
+cargo build --release -p canopen-cli --bin canopen-extcap
+```
+
+It advertises the UDP transport and the bundled simulator only — the two the core can
+genuinely open — rather than listing interfaces that cannot be captured from.
+[Wireshark Integration](wireshark.md) has the installation path for each platform, the
+`Decode As` settings for CANopen, and the display filters worth knowing.
 
 ---
 

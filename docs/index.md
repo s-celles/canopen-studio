@@ -22,6 +22,7 @@ Initially created for electric kart telemetry (SEVCON Gen4 inverter & De Haardt 
 - **SDO Object Dictionary Explorer**: Expedited dictionary reader and writer for inspecting and calibrating any CANopen node.
 - **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle rather than assumed, vehicle profiles inherit from a generic J1979 base, and everything is read-only by default.
 - **Native Rust Engine**: Frame parsing, CANopen classification, ISO-TP reassembly and the virtual simulator run as compiled code shared by every front end — see the [measured results](benchmarks.md).
+- **Wireshark and PulseView Export**: Capture to PCAP-NG, live through a named pipe or into a file, and reconstruct the waveform a frame would have made as VCD for sigrok — one capture, the protocol in one tool and the bits in the other.
 - **AI Agent Integration**: Built-in MCP and A2A servers let an AI agent read the live trace, inspect nodes and telemetry, transmit frames, drive the NMT state machine and control the network bridge.
 - **Real Bus Network Bridge**: Mirror a physical CAN bus — a drive, an inverter, a live harness — onto a UDP multicast group so remote machines observe the real traffic as if they were wired to it.
 - **Two Front Ends, One Engine**: The full-featured Python studio, and a lean native front end built with Slint, both driving the same protocol core.
@@ -41,6 +42,8 @@ Initially created for electric kart telemetry (SEVCON Gen4 inverter & De Haardt 
 
 - [Hardware & Interfaces](hardware.md) — supported USB-to-CAN converters, UDP multicast and the real-bus bridge.
 - [Protocol Decoders](decoders.md) — how CAN packets and devices are decoded, and how to add your own.
+- [Wireshark Integration](wireshark.md) — capture files, live pipes, `Decode As` and display filters.
+- [Logic Analyzer & Signals](logic_analyzer.md) — probing the wire itself, one layer below the adapter.
 - [Telemetry & Oscilloscope](telemetry.md) — multi-trace plotting and signal reverse engineering.
 - [Transmission Console](transmission.md) — NMT master, SYNC generator and frame templates.
 - [SDO & NMT Master](sdo_nmt.md) — reading and writing the object dictionary.
