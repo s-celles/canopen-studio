@@ -22,6 +22,11 @@
 //!
 //! Levels are the ones a transceiver's RX pin carries: `false` is dominant,
 //! `true` is recessive, and an idle bus is recessive.
+//!
+//! The reverse direction — [`decode_frame_bits`] — reads bits a probe really
+//! saw and gives back the frame *and* the two things the wire knows and an
+//! adapter does not: whether the CRC checked out, and whether anybody pulled
+//! the ACK slot dominant.
 
 use crate::frame::CanFrame;
 
@@ -138,6 +143,209 @@ pub fn frame_bits(frame: &CanFrame, ack: AckSlot) -> Vec<bool> {
     bits.push(true); // ACK delimiter
     bits.extend(std::iter::repeat_n(true, EOF_BITS + INTERMISSION_BITS));
     bits
+}
+
+/// Why a run of bits is not a frame.
+///
+/// These are not failures of this code: a bus in trouble puts exactly these on
+/// the wire, and reporting which one appeared is the point of decoding from the
+/// wire rather than from an adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitError {
+    /// The stream is recessive where a frame would have started.
+    NoStartOfFrame,
+    /// The bits ran out mid-frame.
+    Truncated,
+    /// Six equal bits inside the stuffed span. A transmitter never sends that,
+    /// so it is either an error flag or a bus fault — in both cases something
+    /// an adapter would have resolved and never mentioned.
+    StuffViolation,
+    /// A fixed-form bit carried the wrong value: a delimiter that was dominant,
+    /// or a reserved bit that was recessive.
+    FormError,
+}
+
+/// A frame recovered from the wire, with what only the wire could tell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeasuredFrame {
+    pub frame: CanFrame,
+    /// The CRC over the received fields came out to zero remainder. When this
+    /// is false the frame still decoded — that is deliberate. A frame whose
+    /// CRC fails is evidence, and a controller would have destroyed it before
+    /// any adapter could report it.
+    pub crc_ok: bool,
+    /// Somebody other than the transmitter pulled the ACK slot dominant.
+    pub acknowledged: bool,
+    /// Bits consumed, so a caller walking a stream knows where the next frame
+    /// may start.
+    pub bits_consumed: usize,
+}
+
+/// Reads the wire the way a receiver does: one unstuffed bit at a time,
+/// dropping the transmitter's inserted complements as it goes.
+///
+/// It cannot know in advance how long the frame is — the DLC arrives a third of
+/// the way in — so destuffing has to run alongside the parse rather than as a
+/// pass over a known span.
+struct WireReader<'a> {
+    bits: &'a [bool],
+    pos: usize,
+    run_value: Option<bool>,
+    run_len: usize,
+    /// Stuffing covers SOF through the CRC and nothing after it. Past that,
+    /// EOF's seven recessive bits are legitimate and must not be read as a run
+    /// that somebody forgot to break up.
+    destuffing: bool,
+    /// Every unstuffed bit so far, which is what the CRC is taken over.
+    body: Vec<bool>,
+}
+
+impl<'a> WireReader<'a> {
+    fn new(bits: &'a [bool]) -> Self {
+        Self {
+            bits,
+            pos: 0,
+            run_value: None,
+            run_len: 0,
+            destuffing: true,
+            body: Vec::with_capacity(128),
+        }
+    }
+
+    fn raw(&mut self) -> Result<bool, BitError> {
+        let bit = *self.bits.get(self.pos).ok_or(BitError::Truncated)?;
+        self.pos += 1;
+        Ok(bit)
+    }
+
+    /// Consume the complement the transmitter owes after five equal bits.
+    fn take_pending_stuff_bit(&mut self) -> Result<(), BitError> {
+        if !self.destuffing || self.run_len != STUFF_RUN {
+            return Ok(());
+        }
+        let stuff = self.raw()?;
+        if Some(stuff) == self.run_value {
+            return Err(BitError::StuffViolation);
+        }
+        self.run_value = Some(stuff);
+        self.run_len = 1;
+        Ok(())
+    }
+
+    fn next(&mut self) -> Result<bool, BitError> {
+        self.take_pending_stuff_bit()?;
+        let bit = self.raw()?;
+        if Some(bit) == self.run_value {
+            self.run_len += 1;
+        } else {
+            self.run_value = Some(bit);
+            self.run_len = 1;
+        }
+        if self.destuffing {
+            self.body.push(bit);
+        }
+        Ok(bit)
+    }
+
+    fn number(&mut self, width: usize) -> Result<u32, BitError> {
+        let mut value = 0u32;
+        for _ in 0..width {
+            value = (value << 1) | u32::from(self.next()?);
+        }
+        Ok(value)
+    }
+
+    /// Leave the stuffed span. A run ending on the CRC's last bit still owes a
+    /// stuff bit, which sits between the CRC and its delimiter.
+    fn end_stuffed_span(&mut self) -> Result<(), BitError> {
+        self.take_pending_stuff_bit()?;
+        self.destuffing = false;
+        Ok(())
+    }
+
+    fn expect_recessive(&mut self) -> Result<(), BitError> {
+        if self.next()? {
+            Ok(())
+        } else {
+            Err(BitError::FormError)
+        }
+    }
+}
+
+/// Recover one frame from the bits of a probe.
+///
+/// The inverse of [`frame_bits`], and the reason a waveform read from a logic
+/// analyzer can become a frame in the trace instead of a picture to squint at.
+/// Classic CAN only: a recessive reserved bit means CAN FD, which this refuses
+/// rather than mis-parsing into a plausible wrong frame.
+pub fn decode_frame_bits(bits: &[bool]) -> Result<MeasuredFrame, BitError> {
+    let mut wire = WireReader::new(bits);
+
+    if wire.next()? {
+        return Err(BitError::NoStartOfFrame);
+    }
+
+    let id_a = wire.number(11)?;
+    // Bit 12 is RTR on a standard frame and SRR on an extended one; which it
+    // was is only settled by the IDE bit that follows it.
+    let rtr_or_srr = wire.next()?;
+    let is_extended = wire.next()?;
+
+    let (id, is_remote) = if is_extended {
+        let id_b = wire.number(18)?;
+        let rtr = wire.next()?;
+        // r1 and r0. A recessive r1 is CAN FD's marker, not a classic frame.
+        if wire.next()? || wire.next()? {
+            return Err(BitError::FormError);
+        }
+        ((id_a << 18) | id_b, rtr)
+    } else {
+        if wire.next()? {
+            return Err(BitError::FormError); // r0
+        }
+        (id_a, rtr_or_srr)
+    };
+
+    // Classic CAN caps the payload at eight bytes; a DLC above that still asks
+    // for eight, and the extra codes only mean something to CAN FD.
+    let dlc = wire.number(4)? as u8;
+    let data_len = usize::from(dlc.min(8));
+
+    let mut data = [0u8; 8];
+    if !is_remote {
+        for byte in data.iter_mut().take(data_len) {
+            *byte = wire.number(8)? as u8;
+        }
+    }
+
+    wire.number(15)?; // the transmitted CRC, checked below through the remainder
+    wire.end_stuffed_span()?;
+
+    // A CRC that covers its own remainder leaves zero. That is what a
+    // controller computes, and it needs no separate comparison.
+    let crc_ok = crc15(&wire.body) == 0;
+
+    wire.expect_recessive()?; // CRC delimiter
+    let acknowledged = !wire.next()?;
+    wire.expect_recessive()?; // ACK delimiter
+    for _ in 0..EOF_BITS {
+        wire.expect_recessive()?;
+    }
+
+    Ok(MeasuredFrame {
+        frame: CanFrame {
+            id,
+            is_extended,
+            is_remote,
+            is_error: false,
+            dlc,
+            data,
+            timestamp_us: 0,
+        },
+        crc_ok,
+        acknowledged,
+        bits_consumed: wire.pos,
+    })
 }
 
 #[cfg(test)]
@@ -333,6 +541,146 @@ mod tests {
         ] {
             assert_eq!(crc15(&frame_fields(&sent)), 0, "id 0x{:X}", sent.id);
         }
+    }
+
+    /// Send a frame onto the wire and read it back, the way the two halves
+    /// will meet once a probe feeds the decoder.
+    fn round_trip(sent: &CanFrame) -> MeasuredFrame {
+        decode_frame_bits(&frame_bits(sent, AckSlot::Acknowledged))
+            .expect("a frame this side built is a frame the other side reads")
+    }
+
+    #[test]
+    fn a_standard_frame_comes_back_off_the_wire_unchanged() {
+        let sent = frame(0x123, &[0xDE, 0xAD, 0xBE, 0xEF]);
+        let read = round_trip(&sent);
+
+        assert_eq!(read.frame.id, sent.id);
+        assert_eq!(read.frame.dlc, sent.dlc);
+        assert_eq!(read.frame.data, sent.data);
+        assert!(!read.frame.is_extended);
+        assert!(!read.frame.is_remote);
+        assert!(read.crc_ok, "the CRC it carried is the one it deserved");
+    }
+
+    #[test]
+    fn an_extended_frame_keeps_all_twenty_nine_bits_of_its_identifier() {
+        let mut sent = frame(0x18EA_FFFE, &[0x01, 0x02]);
+        sent.is_extended = true;
+        let read = round_trip(&sent);
+
+        assert!(read.frame.is_extended);
+        assert_eq!(read.frame.id, 0x18EA_FFFE);
+        assert_eq!(read.frame.data[..2], [0x01, 0x02]);
+    }
+
+    #[test]
+    fn a_remote_frame_comes_back_asking_for_bytes_it_does_not_carry() {
+        let mut sent = frame(0x123, &[]);
+        sent.is_remote = true;
+        sent.dlc = 8;
+        let read = round_trip(&sent);
+
+        assert!(read.frame.is_remote);
+        assert_eq!(read.frame.dlc, 8);
+        assert_eq!(read.frame.data, [0u8; 8], "an RTR frame carries no data");
+    }
+
+    #[test]
+    fn every_payload_length_survives_the_wire() {
+        for len in 0..=8usize {
+            let payload: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            let sent = frame(0x2AA, &payload);
+            let read = round_trip(&sent);
+
+            assert_eq!(read.frame.dlc as usize, len);
+            assert_eq!(read.frame.data[..len], payload[..], "payload of {len}");
+        }
+    }
+
+    #[test]
+    fn the_worst_case_for_stuffing_still_reads_back() {
+        // All-dominant and all-recessive contents are where the transmitter
+        // inserts the most stuff bits, and where a decoder that miscounts the
+        // run goes wrong first.
+        for sent in [frame(0x000, &[0x00; 8]), frame(0x7FF, &[0xFF; 8])] {
+            let read = round_trip(&sent);
+            assert_eq!(read.frame.id, sent.id);
+            assert_eq!(read.frame.data, sent.data);
+            assert!(read.crc_ok);
+        }
+    }
+
+    #[test]
+    fn the_decoder_consumes_exactly_the_frame_and_leaves_the_intermission() {
+        let sent = frame(0x123, &[0xAA]);
+        let bits = frame_bits(&sent, AckSlot::Acknowledged);
+        let read = decode_frame_bits(&bits).expect("decodes");
+
+        assert_eq!(
+            bits.len() - read.bits_consumed,
+            INTERMISSION_BITS,
+            "a frame ends at EOF; the intermission belongs to the bus"
+        );
+    }
+
+    #[test]
+    fn a_frame_nobody_answered_is_reported_as_unacknowledged() {
+        let sent = frame(0x123, &[0xAA]);
+
+        let answered = decode_frame_bits(&frame_bits(&sent, AckSlot::Acknowledged)).unwrap();
+        let ignored = decode_frame_bits(&frame_bits(&sent, AckSlot::Unanswered)).unwrap();
+
+        assert!(answered.acknowledged);
+        assert!(
+            !ignored.acknowledged,
+            "this is the question an adapter can never answer"
+        );
+    }
+
+    #[test]
+    fn a_corrupted_payload_decodes_but_fails_its_crc() {
+        // The frame still parses: reporting it with crc_ok false is the point,
+        // because a controller would have destroyed it and told nobody.
+        let sent = frame(0x2AA, &[0x55, 0x55, 0x55, 0x55]);
+        let mut bits = frame_bits(&sent, AckSlot::Acknowledged);
+
+        // An alternating payload carries no stuff bits, so flipping one bit in
+        // it corrupts the data without disturbing the framing.
+        let flipped = 30;
+        bits[flipped] = !bits[flipped];
+
+        let read = decode_frame_bits(&bits).expect("the framing is still intact");
+        assert!(!read.crc_ok, "the CRC no longer covers what arrived");
+    }
+
+    #[test]
+    fn six_equal_bits_are_refused_rather_than_read_as_data() {
+        // What an error flag looks like on the wire, and what an adapter
+        // resolves silently before anybody sees it.
+        let mut bits = frame_bits(&frame(0x2AA, &[0x55]), AckSlot::Acknowledged);
+        for bit in bits.iter_mut().skip(1).take(8) {
+            *bit = false;
+        }
+
+        assert_eq!(decode_frame_bits(&bits), Err(BitError::StuffViolation));
+    }
+
+    #[test]
+    fn an_idle_bus_is_not_a_frame() {
+        assert_eq!(
+            decode_frame_bits(&[true; 20]),
+            Err(BitError::NoStartOfFrame)
+        );
+    }
+
+    #[test]
+    fn bits_that_stop_mid_frame_are_reported_as_truncated() {
+        let bits = frame_bits(&frame(0x123, &[0xAA, 0xBB]), AckSlot::Acknowledged);
+        assert_eq!(
+            decode_frame_bits(&bits[..bits.len() / 2]),
+            Err(BitError::Truncated)
+        );
     }
 
     #[test]
