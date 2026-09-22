@@ -15,9 +15,6 @@ dependencies = [
     "pyserial>=3.5",
     "python-can>=4.4.0",
     "msgpack>=1.0.8",
-    "fastmcp>=2.0",
-    "a2a-sdk>=0.2",
-    "fastapi[standard]>=0.115",
     "pyyaml>=6.0",
 ]
 
@@ -25,6 +22,17 @@ dependencies = [
 # Importing manufacturer signal definitions from a DBC database. Optional because the
 # generic J1979 profile, and every profile written by hand, works without it.
 dbc = ["cantools>=39.0"]
+# The MCP and A2A servers, which let an agent drive the analyser. Optional because
+# `gui.py` already imports them inside a `try`/`except ImportError` and runs with
+# `_SERVERS_AVAILABLE = False` when they are absent — nothing on a bench needs an
+# agent. They are also the heavy half of an installation: together they pull
+# cryptography, pydantic-core, beartype, pygments and the google namespace, which
+# is what took a deployed copy from 33 MB to 61 MB.
+servers = [
+    "fastmcp>=2.0",
+    "a2a-sdk>=0.2",
+    "fastapi[standard]>=0.115",
+]
 
 [dependency-groups]
 dev = [
@@ -36,6 +44,11 @@ dev = [
     "pre-commit>=3.8.0",
     # Exercises the optional DBC importer in CI; the package itself does not need it.
     "cantools>=39.0",
+    # Same reason: the MCP and A2A servers moved to the `servers` extra, and their
+    # tests must still run. A deployed copy leaves them out.
+    "fastmcp>=2.0",
+    "a2a-sdk>=0.2",
+    "fastapi[standard]>=0.115",
 ]
 
 [tool.ruff]
