@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `just sample N` never stopped after N frames: it passed its argument as `-c`, which
+  `can-sniffer` reads as `--channel`, so the count went to the channel string and the
+  capture ran until interrupted. It now passes `-n`.
+
 ### Documentation
 - The published site trailed the code by two releases. The 0.5.0 Rust engine, the native
   front end and `canopen-cli` appeared nowhere in it, and `ROADMAP.md`, `benchmarks.md`

@@ -46,6 +46,7 @@ just simulate 10            # virtual bus, 10 seconds
 just dashboard              # console dashboard
 just filter 0x473           # one identifier
 just record capture.csv     # capture to CSV
+just sample 50              # stop after 50 frames
 just listen-only            # no ACK on the bus
 just extended               # 29-bit frames only
 just standard               # 11-bit frames only
