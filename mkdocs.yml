@@ -50,6 +50,11 @@ plugins:
           - hardware.md
           - decoders.md
           - logic_analyzer.md
+        Architecture and performance:
+          - architecture.md
+          - rust_core.md
+          - cli.md
+          - benchmarks.md
         Analysis and transmission:
           - telemetry.md
           - transmission.md
@@ -60,6 +65,9 @@ plugins:
         Automation:
           - ai_integration.md
           - updates.md
+        Project:
+          - roadmap.md
+          - changelog.md
 
 markdown_extensions:
   - admonition
@@ -70,7 +78,11 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  # ROADMAP.md, benchmarks.md and CHANGELOG.md stay at the repository root, where
+  # GitHub and the README expect them, and are pulled into the site from there.
+  - pymdownx.snippets:
+      base_path: ['.']
+      check_paths: true
   - tables
   - attr_list
 
@@ -81,6 +93,9 @@ nav:
   - Hardware & Interfaces: hardware.md
   - Protocol Stack & Decoders: decoders.md
   - Logic Analyzer & Signals: logic_analyzer.md
+  - Architecture: architecture.md
+  - Native Engine & Front End: rust_core.md
+  - Command-Line Tools: cli.md
   - Telemetry & Oscilloscope: telemetry.md
   - Transmission Console: transmission.md
   - SDO & NMT Master: sdo_nmt.md
@@ -89,3 +104,6 @@ nav:
   - AI Integration (MCP & A2A): ai_integration.md
   - Screenshots Gallery: gallery.md
   - In-App Updates: updates.md
+  - Performance Benchmarks: benchmarks.md
+  - Roadmap: roadmap.md
+  - Changelog: changelog.md

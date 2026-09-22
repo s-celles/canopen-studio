@@ -4,11 +4,25 @@ This guide details all available deployment and installation workflows for **CAN
 
 ---
 
-## 1. Standalone Windows Executable & Installer (.exe)
+Released builds include the compiled `canopen_core` engine. A Git checkout does not until
+you build it — see [§4](#4-building-from-source) and
+[Native Engine & Front End](rust_core.md).
+
+---
+
+## 1. Standalone Application (no Python required)
 
 Ideal for workshop technicians, lab benches, and educational computers where Python is not installed.
+Every tagged release publishes assets for the three desktop platforms:
 
-### Standard Setup Wizard
+| Platform | Asset |
+|---|---|
+| Windows | `CANopen-Studio-vX.Y.Z-Windows-Setup.exe` (setup wizard) |
+| Windows | `CANopen-Studio-Windows-x64-Portable.zip` (portable) |
+| macOS | `CANopen-Studio-macOS-x64-Portable.tar.gz` |
+| Linux | `CANopen-Studio-Linux-x64-Portable.tar.gz` |
+
+### Windows Setup Wizard
 1. Download **`CANopen-Studio-vX.Y.Z-Windows-Setup.exe`** from [GitHub Releases](https://github.com/s-celles/canopen-studio/releases).
 2. Follow the setup wizard to install into `C:\Program Files\CANopen Studio`.
 3. The wizard creates:
@@ -16,10 +30,11 @@ Ideal for workshop technicians, lab benches, and educational computers where Pyt
    - Start Menu program group with uninstaller
    - System uninstaller entry in Windows Settings / Control Panel
 
-### Portable Zip Package
-1. Download **`CANopen-Studio-vX.Y.Z-Windows-x64-Portable.zip`**.
+### Portable Packages
+1. Download the portable archive for your platform.
 2. Extract anywhere (e.g. on a USB drive).
-3. Double-click **`CANopen-Studio.exe`** to launch immediately.
+3. Launch **`CANopen-Studio.exe`** on Windows, `CANopen-Studio.app` on macOS, or the
+   `CANopen-Studio` binary on Linux.
 
 ---
 
@@ -32,12 +47,15 @@ When developing or cloning from GitHub:
    cd canopen-studio
    ```
 2. Double-click **`install.bat`** (or run `just install`).
-3. The installer script:
+3. The installer script (`scripts/install.py`, which dispatches to the per-OS script):
    - Checks and automatically installs Astral's `uv` if missing
    - Synchronizes dependencies into `.venv`
    - Generates the high-resolution vector icon assets
-   - Creates a Windows Desktop shortcut pointing to `can_gui.py` via `pythonw.exe` (no terminal window)
-   - Creates a Start Menu shortcut
+   - Creates a Desktop shortcut launching the studio without a terminal window
+   - Creates a Start Menu entry (Windows)
+
+It does **not** build the Rust engine; run `just rust-python` after it if you want the
+native core and the OBD-II tab.
 
 ---
 
@@ -51,7 +69,16 @@ Then invoke the tools directly from any terminal:
 ```bash
 canopen-studio          # Launches the graphical studio
 can-sniffer --help      # Command-line protocol sniffer
+canopen-mcp             # MCP server, standalone
+canopen-a2a             # A2A server, standalone (also needs CANOPEN_STUDIO_A2A=1)
 ```
+
+!!! warning "No compiled engine this way"
+    A wheel built from source by `uv tool` or `pip` carries the Python code only: the
+    build backend is plain setuptools and the Rust workspace sits beside it. The studio
+    runs, a little slower, but the [OBD-II tab](obd.md) needs `canopen_core` and will
+    raise `ImportError` on first use. Use a released build, or a checkout with
+    `just rust-python`.
 
 ### Via `pip`
 ```bash
@@ -64,7 +91,23 @@ pip install -e .
 
 ## 4. Building from Source
 
-To compile the standalone Windows executable yourself:
+```bash
+git clone https://github.com/s-celles/canopen-studio.git
+cd canopen-studio
+
+just setup          # uv sync: Python dependencies into .venv
+just rust-python    # build the canopen_core extension and place it in the package
+just check          # ruff format --check, ruff check, pytest
+just gui            # launch the studio
+```
+
+`just rust-python` needs a [Rust toolchain](https://rustup.rs/). Without it the studio
+still runs — `UdpBus`, the CANopen layer and the simulator fall back to Python — but the
+OBD-II diagnostics do not, and roughly ninety tests fail on
+`ImportError: cannot import name 'canopen_core'`. That is a missing build step, not a
+broken tree.
+
+To compile the standalone executable yourself:
 ```powershell
 # Build standalone directory
 just build-exe
@@ -74,16 +117,26 @@ just build-portable
 ```
 Artifacts are generated in the `dist/` directory.
 
+The Rust workspace builds and tests on its own:
+```bash
+just rust-build     # cargo build --workspace
+just rust-test      # cargo test --workspace
+just rust-gui       # the native Slint front end
+```
+
 ---
 
 ## 5. Automated CI/CD Releases
 
-The repository includes a GitHub Actions workflow in [`.github/workflows/release.yml`](file:///C:/Users/scelles/Downloads/Huard/CANopen_kart/.github/workflows/release.yml).
-Whenever a Git tag matching `v*` is pushed:
-1. PyInstaller builds the standalone executable on Windows.
-2. Inno Setup compiles the native Windows Setup wizard.
-3. A portable `.zip` is created.
-4. Assets are automatically attached to the GitHub Release.
+The repository includes a GitHub Actions workflow in
+[`.github/workflows/release.yml`](https://github.com/s-celles/canopen-studio/blob/main/.github/workflows/release.yml).
+Whenever a Git tag matching `v*` is pushed, on Windows, macOS and Linux in parallel:
+1. A Rust toolchain is installed and `scripts/build_extension.py` compiles `canopen_core`
+   into the package, so the published builds carry the native engine.
+2. PyInstaller builds the standalone application.
+3. Inno Setup compiles the Windows Setup wizard.
+4. A portable `.zip` (Windows) or `.tar.gz` (macOS, Linux) is created.
+5. Assets are automatically attached to the GitHub Release.
 
 ---
 

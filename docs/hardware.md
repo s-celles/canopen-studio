@@ -65,7 +65,7 @@ Set the `CANOPEN_UDP_HOP_LIMIT` environment variable before launching the applic
 
 ```bash
 # Allow the virtual bus to cross up to 4 routers
-CANOPEN_UDP_HOP_LIMIT=4 uv run python can_gui.py
+CANOPEN_UDP_HOP_LIMIT=4 uv run canopen-studio
 ```
 
 Or pass it per connection through the MCP / A2A `connect` tool, which overrides the variable:

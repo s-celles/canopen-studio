@@ -6,7 +6,7 @@ This document outlines the strategic engineering roadmap for **CANopen Studio**.
 
 ## 🎯 Executive Summary & Strategic Priorities
 
-1. **High-Performance Core Engine (Preferred: Rust)**: Addressing architectural bottlenecks identified in the [baseline benchmarks](benchmarks.md) (Python GIL contention, heap allocation per frame, timer jitter) to achieve microsecond-level determinism and handle > 500,000 frames/sec.
+1. **High-Performance Core Engine (Preferred: Rust)**: Addressing architectural bottlenecks identified in the [baseline benchmarks](https://s-celles.github.io/canopen-studio/benchmarks/) (Python GIL contention, heap allocation per frame, timer jitter) to achieve microsecond-level determinism and handle > 500,000 frames/sec.
 2. **Mobile Deployment (Android & iOS)**: Porting the application to mobile smartphones using a shared cross-platform compiled core, supporting Bluetooth Low Energy (BLE), Wi-Fi UDP, and USB OTG.
 3. **Next-Generation Agentic AI Protocols**: Expanding beyond the existing **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** servers to natively support emerging agentic interaction standards (**AG-UI**, **A2UI**, and **Agent Control Protocol - ACP**).
 4. **Automotive & Industrial Protocol Expansions**: Adding CANopen FD, UDS (ISO 14229) over ISO-TP, and automated DBC/EDS-driven decoding.
@@ -53,7 +53,7 @@ flowchart TD
 ## 1. Engine Evolution: Migration to Compiled Core (Rust)
 
 ### 1.1. Motivation & Benchmark Findings
-As documented in [`benchmarks.md`](benchmarks.md), the current Python implementation successfully validates the feature set and supports cross-machine bus bridging. However, empirical measurements reveal critical limitations for production automotive and industrial automation deployments:
+As documented in [`benchmarks.md`](https://s-celles.github.io/canopen-studio/benchmarks/), the current Python implementation successfully validates the feature set and supports cross-machine bus bridging. However, empirical measurements reveal critical limitations for production automotive and industrial automation deployments:
 
 * **Global Interpreter Lock (GIL) Contention**: The single-threaded execution lock causes serialization between the packet capture loop (`_rx_loop`), the Tkinter GUI render cycle (60 Hz), and asynchronous MCP JSON-RPC handlers.
 * **Per-Frame Dynamic Allocations**: Packaging each message as a Python `can.Message` object and MessagePack dictionary generates heavy garbage collector overhead under high bus loads (> 10,000 frames/sec).
