@@ -48,15 +48,25 @@ pub struct PyCanFrame {
 #[pymethods]
 impl PyCanFrame {
     #[new]
-    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=None))]
+    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=None, is_fd=false, bitrate_switch=false))]
     pub fn new(
         id: u32,
         data: Option<&[u8]>,
         timestamp_us: Option<u64>,
         is_extended: Option<bool>,
+        is_fd: bool,
+        bitrate_switch: bool,
     ) -> PyResult<Self> {
         let payload = data.unwrap_or(&[]);
-        let mut frame = if let Some(ts) = timestamp_us {
+        let mut frame = if is_fd {
+            let ts = timestamp_us.unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_micros() as u64
+            });
+            CanFrame::new_fd(id, payload, ts)
+        } else if let Some(ts) = timestamp_us {
             CanFrame::new_with_timestamp(id, payload, ts)
         } else {
             CanFrame::new(id, payload)
@@ -66,8 +76,31 @@ impl PyCanFrame {
         if let Some(ext) = is_extended {
             frame.is_extended = ext;
         }
+        frame.bitrate_switch = bitrate_switch;
 
         Ok(PyCanFrame { inner: frame })
+    }
+
+    #[getter]
+    pub fn is_fd(&self) -> bool {
+        self.inner.is_fd
+    }
+
+    #[getter]
+    pub fn bitrate_switch(&self) -> bool {
+        self.inner.bitrate_switch
+    }
+
+    #[getter]
+    pub fn error_state_indicator(&self) -> bool {
+        self.inner.error_state_indicator
+    }
+
+    /// The 4-bit DLC code this frame puts on the wire, which on CAN FD is not
+    /// the payload length: 64 bytes travel under code 15.
+    #[getter]
+    pub fn dlc_code(&self) -> u8 {
+        self.inner.dlc_code()
     }
 
     #[getter]
@@ -1133,7 +1166,7 @@ impl PyPcapNgWriter {
     ///
     /// `dlc` only matters for a remote frame, which asks for a length it does
     /// not carry: everywhere else the payload already states it.
-    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=false, is_remote=false, is_error=false, dlc=None))]
+    #[pyo3(signature = (id, data=None, timestamp_us=None, is_extended=false, is_remote=false, is_error=false, dlc=None, is_fd=false, bitrate_switch=false, error_state_indicator=false))]
     #[allow(clippy::too_many_arguments)]
     pub fn write_frame(
         &mut self,
@@ -1144,18 +1177,38 @@ impl PyPcapNgWriter {
         is_remote: bool,
         is_error: bool,
         dlc: Option<u8>,
+        is_fd: bool,
+        bitrate_switch: bool,
+        error_state_indicator: bool,
     ) -> PyResult<()> {
         let payload = data.unwrap_or(&[]);
-        let mut frame = match timestamp_us {
-            Some(ts) => CanFrame::new_with_timestamp(id, payload, ts),
-            None => CanFrame::new(id, payload),
+        let ts = timestamp_us.unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64
+        });
+        let mut frame = if is_fd {
+            CanFrame::new_fd(id, payload, ts)
+        } else {
+            match timestamp_us {
+                Some(ts) => CanFrame::new_with_timestamp(id, payload, ts),
+                None => CanFrame::new(id, payload),
+            }
         }
         .map_err(|e| PyValueError::new_err(e.to_string()))?;
         frame.is_extended = is_extended;
-        frame.is_remote = is_remote;
         frame.is_error = is_error;
+        if is_fd {
+            // CAN FD has no remote frame, so the flag is dropped rather than
+            // written into a record that cannot express it.
+            frame.bitrate_switch = bitrate_switch;
+            frame.error_state_indicator = error_state_indicator;
+        } else {
+            frame.is_remote = is_remote;
+        }
         if let Some(requested) = dlc {
-            frame.dlc = requested.min(8);
+            frame.dlc = requested.min(frame.max_payload() as u8);
         }
 
         let writer = self

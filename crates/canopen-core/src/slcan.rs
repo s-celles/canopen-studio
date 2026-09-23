@@ -17,12 +17,30 @@
 //!   R 0000CAFE 0            extended remote
 //! ```
 //!
+//! CAN FD adds four more letters, and one trap with them: the length digit is
+//! the **DLC code**, not the byte count, so `F` asks for 64 bytes and there is
+//! no digit that means 9.
+//!
+//! ```text
+//!   d 1AB 9 <12 bytes>      FD standard, no bitrate switch
+//!   D 0000CAFE F <64 bytes> FD extended, no bitrate switch
+//!   b 1AB 2 DEAD            FD standard, bitrate switch
+//!   B 0000CAFE 0            FD extended, bitrate switch, empty
+//! ```
+//!
+//! FD has no standard here to follow: the firmwares disagree, some using `x`
+//! and `X`, others a leading `0` or `1`. This follows `python-can`'s slcan
+//! driver, which follows the CANable 2.0 firmware — the adapter family this
+//! module already names, and the stack the studio interoperates with
+//! everywhere else. Note that `x` means something else in that dialect: a
+//! CANdapter spelling of a *classic* extended frame, not an FD one.
+//!
 //! The adapter answers a bare `\r` for success and `\x07` (BELL) for refusal.
 //!
 //! The codec here is deliberately free of any serial dependency so it can be
 //! tested without hardware; [`SlcanBus`] is the thin part that owns a port.
 
-use crate::frame::{CanError, CanFrame};
+use crate::frame::{CanError, CanFrame, fd_dlc_code, fd_length_for_code};
 
 /// The bit rates a LAWICEL adapter accepts, as the `S<n>` command that selects
 /// one. Anything else has to be set on the adapter itself.
@@ -88,9 +106,16 @@ impl SlcanBitrate {
 /// Render a frame as the line that transmits it, carriage return included.
 pub fn encode_frame(frame: &CanFrame) -> Result<String, CanError> {
     let dlc = frame.dlc as usize;
-    if dlc > 8 {
-        return Err(CanError::InvalidDlc(dlc));
-    }
+    // The length digit differs between the two grammars: classic spells the
+    // byte count, FD spells the DLC code that names it.
+    let length_digit = if frame.is_fd {
+        fd_dlc_code(dlc).ok_or(CanError::InvalidFdLength(dlc))?
+    } else {
+        if dlc > 8 {
+            return Err(CanError::InvalidDlc(dlc));
+        }
+        dlc as u8
+    };
     let limit = if frame.is_extended {
         0x1FFF_FFFF
     } else {
@@ -101,20 +126,30 @@ pub fn encode_frame(frame: &CanFrame) -> Result<String, CanError> {
     }
 
     let mut out = String::with_capacity(4 + 8 + 1 + dlc * 2 + 1);
-    out.push(match (frame.is_extended, frame.is_remote) {
-        (false, false) => 't',
-        (true, false) => 'T',
-        (false, true) => 'r',
-        (true, true) => 'R',
-    });
+    out.push(
+        match (frame.is_fd, frame.is_extended, frame.bitrate_switch) {
+            // CAN FD has no remote frame, so is_remote plays no part here.
+            (true, false, false) => 'd',
+            (true, true, false) => 'D',
+            (true, false, true) => 'b',
+            (true, true, true) => 'B',
+            (false, ..) => match (frame.is_extended, frame.is_remote) {
+                (false, false) => 't',
+                (true, false) => 'T',
+                (false, true) => 'r',
+                (true, true) => 'R',
+            },
+        },
+    );
     if frame.is_extended {
         out.push_str(&format!("{:08X}", frame.id));
     } else {
         out.push_str(&format!("{:03X}", frame.id));
     }
-    out.push_str(&format!("{dlc:X}"));
-    // A remote frame asks for a length and carries nothing.
-    if !frame.is_remote {
+    out.push_str(&format!("{length_digit:X}"));
+    // A remote frame asks for a length and carries nothing. FD has no remote
+    // frame, so an FD frame always carries its payload.
+    if frame.is_fd || !frame.is_remote {
         for b in frame.payload() {
             out.push_str(&format!("{b:02X}"));
         }
@@ -136,11 +171,18 @@ pub fn encode_frame(frame: &CanFrame) -> Result<String, CanError> {
 pub fn decode_line(line: &str, timestamp_us: u64) -> Option<CanFrame> {
     let line = line.trim_end_matches(['\r', '\n']);
     let (kind, rest) = line.split_at_checked(1)?;
-    let (is_extended, is_remote) = match kind {
-        "t" => (false, false),
-        "T" => (true, false),
-        "r" => (false, true),
-        "R" => (true, true),
+    // `x` is deliberately absent: in this dialect it is a CANdapter spelling
+    // of a classic extended frame, not an FD one, and guessing either way
+    // would decode a frame into the wrong format.
+    let (is_extended, is_remote, is_fd, bitrate_switch) = match kind {
+        "t" => (false, false, false, false),
+        "T" => (true, false, false, false),
+        "r" => (false, true, false, false),
+        "R" => (true, true, false, false),
+        "d" => (false, false, true, false),
+        "D" => (true, false, true, false),
+        "b" => (false, false, true, true),
+        "B" => (true, false, true, true),
         _ => return None,
     };
 
@@ -155,10 +197,17 @@ pub fn decode_line(line: &str, timestamp_us: u64) -> Option<CanFrame> {
     }
 
     let (dlc_hex, mut payload_hex) = rest.split_at(1);
-    let dlc = u8::from_str_radix(dlc_hex, 16).ok()?;
-    if dlc > 8 {
-        return None;
-    }
+    let code = u8::from_str_radix(dlc_hex, 16).ok()?;
+    // On FD the digit is the DLC code, so `F` is 64 bytes; on classic it is
+    // the byte count itself, and a digit above 8 is not this grammar.
+    let dlc = if is_fd {
+        fd_length_for_code(code)
+    } else {
+        if code > 8 {
+            return None;
+        }
+        code
+    };
 
     let expected = if is_remote { 0 } else { dlc as usize * 2 };
     // Anything past the payload can only be the optional Z1 timestamp.
@@ -169,7 +218,7 @@ pub fn decode_line(line: &str, timestamp_us: u64) -> Option<CanFrame> {
         return None;
     }
 
-    let mut data = [0u8; 8];
+    let mut data = [0u8; 64];
     for i in 0..expected / 2 {
         data[i] = u8::from_str_radix(&payload_hex[i * 2..i * 2 + 2], 16).ok()?;
     }
@@ -179,6 +228,11 @@ pub fn decode_line(line: &str, timestamp_us: u64) -> Option<CanFrame> {
         is_extended,
         is_remote,
         is_error: false,
+        is_fd,
+        bitrate_switch,
+        // The dialect carries no error state indicator, so it is never set
+        // from a line rather than guessed at.
+        error_state_indicator: false,
         dlc,
         data,
         timestamp_us,
@@ -430,6 +484,88 @@ mod tests {
             assert_eq!(back.is_extended, original.is_extended, "{line}");
             assert_eq!(back.is_remote, original.is_remote, "{line}");
             assert_eq!(back.payload(), original.payload(), "{line}");
+        }
+    }
+
+    #[test]
+    fn an_fd_frame_spells_its_length_as_a_dlc_code_not_a_byte_count() {
+        // The trap of this grammar: `9` asks for twelve bytes and `F` for
+        // sixty-four. Spelling the count would truncate every long frame.
+        let twelve = CanFrame::new_fd(0x1AB, &[0xAA; 12], 0).unwrap();
+        let line = encode_frame(&twelve).unwrap();
+        assert!(line.starts_with("d1AB9"), "got {line}");
+        assert_eq!(line.len(), 1 + 3 + 1 + 24 + 1);
+
+        let full = CanFrame::new_fd(0x1AB, &[0xBB; 64], 0).unwrap();
+        assert!(encode_frame(&full).unwrap().starts_with("d1ABF"));
+    }
+
+    #[test]
+    fn the_four_fd_letters_say_extended_and_bitrate_switch() {
+        let mut frame = CanFrame::new_fd(0x1AB, &[0xDE, 0xAD], 0).unwrap();
+        assert!(encode_frame(&frame).unwrap().starts_with("d1AB2"));
+
+        frame.bitrate_switch = true;
+        assert!(encode_frame(&frame).unwrap().starts_with("b1AB2"));
+
+        let mut ext = CanFrame::new_fd(0x0000CAFE, &[0xDE, 0xAD], 0).unwrap();
+        ext.is_extended = true;
+        assert!(encode_frame(&ext).unwrap().starts_with("D0000CAFE2"));
+
+        ext.bitrate_switch = true;
+        assert!(encode_frame(&ext).unwrap().starts_with("B0000CAFE2"));
+    }
+
+    #[test]
+    fn a_length_the_fd_grammar_cannot_spell_is_refused() {
+        // There is no digit meaning nine, so the frame cannot be sent as it
+        // stands and saying so beats sending twelve bytes the caller never
+        // wrote.
+        let mut frame = CanFrame::new_fd(0x1AB, &[0u8; 12], 0).unwrap();
+        frame.dlc = 9;
+        assert!(matches!(
+            encode_frame(&frame).unwrap_err(),
+            CanError::InvalidFdLength(9)
+        ));
+    }
+
+    #[test]
+    fn an_fd_line_decodes_with_the_length_its_code_names() {
+        let frame = decode_line(&format!("d1AB9{}\r", "AA".repeat(12)), 42).unwrap();
+        assert!(frame.is_fd);
+        assert!(!frame.bitrate_switch);
+        assert_eq!(frame.dlc, 12);
+        assert_eq!(frame.payload(), &[0xAA; 12]);
+        assert_eq!(frame.timestamp_us, 42);
+
+        let brs = decode_line(&format!("B0000CAFEF{}\r", "55".repeat(64)), 0).unwrap();
+        assert!(brs.is_fd);
+        assert!(brs.bitrate_switch);
+        assert!(brs.is_extended);
+        assert_eq!(brs.dlc, 64);
+    }
+
+    #[test]
+    fn a_classic_line_is_never_reread_as_fd() {
+        // `t1AB9...` is not a twelve-byte frame: on the classic grammar a
+        // digit above eight is simply not a frame.
+        assert!(decode_line(&format!("t1AB9{}\r", "AA".repeat(12)), 0).is_none());
+        // And `x` is a CANdapter classic extended frame in this dialect, not
+        // an FD one, so it is left alone rather than guessed at.
+        assert!(decode_line("x0000CAFE1FF\r", 0).is_none());
+    }
+
+    #[test]
+    fn every_fd_length_survives_a_round_trip() {
+        for len in [0usize, 1, 8, 12, 16, 20, 24, 32, 48, 64] {
+            let payload: Vec<u8> = (0..len).map(|i| i as u8).collect();
+            let sent = CanFrame::new_fd(0x123, &payload, 7).unwrap();
+            let line = encode_frame(&sent).unwrap();
+            let read = decode_line(&line, 7).unwrap_or_else(|| panic!("{len}: {line}"));
+
+            assert!(read.is_fd, "{len}");
+            assert_eq!(read.dlc as usize, len, "{len}");
+            assert_eq!(read.payload(), &payload[..], "{len}");
         }
     }
 

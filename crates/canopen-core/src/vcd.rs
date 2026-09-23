@@ -127,6 +127,16 @@ impl<W: Write> VcdWriter<W> {
 
     /// Append one frame, rebuilt as a waveform.
     pub fn write_frame(&mut self, frame: &CanFrame) -> io::Result<()> {
+        // The waveform is rebuilt by `frame_bits`, which speaks classic CAN:
+        // FD switches bit rate mid-frame, stuffs differently and uses CRC-17
+        // or CRC-21 instead of CRC-15. Drawing one with the classic rules
+        // would produce a picture no analyser agrees with.
+        if frame.is_fd {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "CAN FD frame cannot be rebuilt with the classic CAN bit rules",
+            ));
+        }
         let bits = frame_bits(frame, self.options.ack);
         let ticks_per_bit = self.options.ticks_per_bit();
 

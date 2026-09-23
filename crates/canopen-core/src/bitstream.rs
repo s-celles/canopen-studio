@@ -33,6 +33,17 @@ use crate::frame::CanFrame;
 /// CAN's CRC-15 generator polynomial, x^15 + x^14 + x^10 + x^8 + x^7 + x^4 + x^3 + 1.
 const CRC15_POLYNOMIAL: u16 = 0x4599;
 
+/// CAN FD's CRC-17 generator, x^17 + x^16 + x^14 + x^13 + x^11 + x^6 + x^4 + x^3 + x + 1,
+/// without the implicit leading term. Used when the payload is 16 bytes or fewer.
+const CRC17_POLYNOMIAL: u32 = 0x1685B;
+
+/// CAN FD's CRC-21 generator, x^21 + x^20 + x^13 + x^11 + x^7 + x^4 + x^3 + 1,
+/// without the implicit leading term. Used beyond 16 bytes of payload.
+const CRC21_POLYNOMIAL: u32 = 0x10_2899;
+
+/// The payload length at which CAN FD changes CRC.
+pub const CRC17_MAX_PAYLOAD: usize = 16;
+
 /// Bits of the same value after which the transmitter inserts its complement.
 const STUFF_RUN: usize = 5;
 
@@ -62,6 +73,71 @@ pub fn crc15(bits: &[bool]) -> u16 {
         }
     }
     crc
+}
+
+/// CAN FD's CRC-17 over a run of bits, most significant first.
+///
+/// The register starts at zero here, which is the polynomial on its own. A CAN
+/// FD *frame* does not start it at zero — ISO 11898-1:2015 seeds it with a
+/// leading one, and that seeding is what separates ISO CAN FD from the 2012
+/// Bosch version whose controllers are not interoperable with it. Keeping the
+/// seed out of this function is what lets it be checked against the published
+/// parametrised algorithm; the framing layer supplies its own.
+pub fn crc17(bits: &[bool]) -> u32 {
+    crc_fd(bits, CRC17_POLYNOMIAL, 17, 0)
+}
+
+/// CAN FD's CRC-21 over a run of bits, most significant first. Same seeding
+/// note as [`crc17`].
+pub fn crc21(bits: &[bool]) -> u32 {
+    crc_fd(bits, CRC21_POLYNOMIAL, 21, 0)
+}
+
+/// Which CRC a payload of this many bytes is covered by (ISO 11898-1).
+pub fn fd_crc_width(payload_len: usize) -> u8 {
+    if payload_len > CRC17_MAX_PAYLOAD {
+        21
+    } else {
+        17
+    }
+}
+
+/// What the FD framing above these CRCs still needs, and why it is not here.
+///
+/// Four details decide whether an FD frame this crate builds matches one a
+/// controller builds, and every one of them survives a round trip against our
+/// own encoder — get the parity backwards and the bits still decode perfectly
+/// here while matching nothing on a real bus:
+///
+/// - the Gray code mapping from stuff-bit count modulo 8 to the three
+///   transmitted bits (the count is Gray-coded and carries an **even** parity
+///   bit, which is pinned; the mapping itself is not),
+/// - whether the CRC covers the dynamic stuff bits as well as the data,
+/// - the interval at which fixed stuff bits are inserted through the CRC field
+///   (their value is pinned: always the complement of the preceding bit),
+/// - the CRC register's initial value, which ISO 11898-1:2015 seeds with a
+///   leading one where the 2012 version seeds with zero.
+///
+/// Confirming them needs the standard itself, or a published bit pattern for a
+/// complete FD frame. Guessing would produce a frame that looks right in every
+/// test this file can write.
+///
+/// A CAN FD CRC of either width, over bits, most significant first.
+///
+/// `seed` is the initial register value: zero to match the published
+/// algorithm, or a leading one as an ISO CAN FD frame requires.
+pub fn crc_fd(bits: &[bool], polynomial: u32, width: u8, seed: u32) -> u32 {
+    let mask = (1u32 << width) - 1;
+    let top = 1u32 << (width - 1);
+    let mut crc = seed & mask;
+    for &bit in bits {
+        let shifted_out = (crc & top) != 0;
+        crc = (crc << 1) & mask;
+        if bit != shifted_out {
+            crc ^= polynomial;
+        }
+    }
+    crc & mask
 }
 
 /// Insert a complement bit after every run of five equal bits.
@@ -102,6 +178,11 @@ fn push_bits(out: &mut Vec<bool>, value: u32, width: usize) {
 /// Dominant is `false`. The result already carries its stuff bits, so it is
 /// what a probe on the RX pin would have seen — for this frame, in isolation.
 pub fn frame_bits(frame: &CanFrame, ack: AckSlot) -> Vec<bool> {
+    debug_assert!(
+        !frame.is_fd,
+        "frame_bits speaks classic CAN: FD switches bit rate, stuffs \
+         differently and uses CRC-17/CRC-21"
+    );
     // Everything from SOF through the data field, unstuffed: this is what the
     // CRC is computed over.
     let mut body = Vec::with_capacity(128);
@@ -311,7 +392,7 @@ pub fn decode_frame_bits(bits: &[bool]) -> Result<MeasuredFrame, BitError> {
     let dlc = wire.number(4)? as u8;
     let data_len = usize::from(dlc.min(8));
 
-    let mut data = [0u8; 8];
+    let mut data = [0u8; 64];
     if !is_remote {
         for byte in data.iter_mut().take(data_len) {
             *byte = wire.number(8)? as u8;
@@ -338,6 +419,11 @@ pub fn decode_frame_bits(bits: &[bool]) -> Result<MeasuredFrame, BitError> {
             is_extended,
             is_remote,
             is_error: false,
+            // This decoder refuses a recessive r1 above, so whatever it
+            // returns came off the wire as classic CAN.
+            is_fd: false,
+            bitrate_switch: false,
+            error_state_indicator: false,
             dlc,
             data,
             timestamp_us: 0,
@@ -408,6 +494,69 @@ mod tests {
 
     fn to_number(bits: &[bool]) -> u32 {
         bits.iter().fold(0u32, |acc, &b| (acc << 1) | u32::from(b))
+    }
+
+    /// Bytes as bits, most significant first — how a CRC catalogue feeds them.
+    fn bits_of(bytes: &[u8]) -> Vec<bool> {
+        bytes
+            .iter()
+            .flat_map(|b| (0..8).rev().map(move |i| (b >> i) & 1 == 1))
+            .collect()
+    }
+
+    #[test]
+    fn crc15_matches_the_published_check_value() {
+        // The classic CRC had no test against anything outside this file: it
+        // rested on the zero-remainder property and on round trips, both of
+        // which a wrong polynomial satisfies. 0x059E is what the catalogue
+        // publishes for CRC-15/CAN over "123456789".
+        assert_eq!(crc15(&bits_of(b"123456789")), 0x059E);
+    }
+
+    #[test]
+    fn the_fd_crcs_match_the_published_check_value() {
+        // "123456789" is the check string every CRC catalogue publishes a
+        // value for, and the only thing here that verifies these polynomials
+        // against something outside this file. A round trip against our own
+        // encoder would pass just as happily with the wrong polynomial.
+        let check = bits_of(b"123456789");
+        assert_eq!(crc17(&check), 0x0_4F03, "CRC-17/CAN-FD");
+        assert_eq!(crc21(&check), 0x0E_D841, "CRC-21/CAN-FD");
+    }
+
+    #[test]
+    fn an_fd_crc_that_covers_its_own_remainder_leaves_zero() {
+        // The property a controller relies on, holding for both FD widths.
+        for (width, poly) in [(17u8, 0x1685Bu32), (21, 0x10_2899)] {
+            let message = bits_of(&[0xDE, 0xAD, 0xBE, 0xEF]);
+            let remainder = crc_fd(&message, poly, width, 0);
+
+            let mut with_remainder = message.clone();
+            for i in (0..width).rev() {
+                with_remainder.push((remainder >> i) & 1 == 1);
+            }
+            assert_eq!(crc_fd(&with_remainder, poly, width, 0), 0, "width {width}");
+        }
+    }
+
+    #[test]
+    fn the_fd_crc_width_turns_over_after_sixteen_bytes() {
+        assert_eq!(fd_crc_width(0), 17);
+        assert_eq!(fd_crc_width(16), 17);
+        assert_eq!(fd_crc_width(20), 21);
+        assert_eq!(fd_crc_width(64), 21);
+    }
+
+    #[test]
+    fn the_seed_is_what_separates_iso_fd_from_the_2012_version() {
+        // Not a detail: a controller seeding with zero and one seeding with a
+        // leading bit do not interoperate, which is why the seed is an
+        // argument here rather than baked into the function.
+        let message = bits_of(&[0x01, 0x02, 0x03]);
+        assert_ne!(
+            crc_fd(&message, 0x1685B, 17, 0),
+            crc_fd(&message, 0x1685B, 17, 1 << 16)
+        );
     }
 
     #[test]
@@ -583,7 +732,11 @@ mod tests {
 
         assert!(read.frame.is_remote);
         assert_eq!(read.frame.dlc, 8);
-        assert_eq!(read.frame.data, [0u8; 8], "an RTR frame carries no data");
+        assert_eq!(
+            read.frame.payload(),
+            &[0u8; 8],
+            "an RTR frame carries no data"
+        );
     }
 
     #[test]

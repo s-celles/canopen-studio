@@ -70,6 +70,27 @@ class TestPcapNgWriter:
         assert record[4] == 2
         assert record[8:10] == bytes([0xDE, 0xAD])
 
+    def test_an_fd_frame_is_written_as_a_72_byte_record_under_the_same_link_type(self, tmp_path):
+        # There is no separate link type for CAN FD. A reader tells the two
+        # apart by the record length and the CANFD_FDF flag, so the block's
+        # lengths carry the distinction.
+        path = tmp_path / "bus.pcapng"
+        with canopen_core.PcapNgWriter(str(path), "virtual") as writer:
+            writer.write_frame(0x123, b"", None, False, False, False, None)
+            writer.write_frame(0x124, bytes(range(32)), 1_700_000_000_000_000, is_fd=True, bitrate_switch=True)
+
+        classic, fd = [body for kind, body in walk_blocks(path.read_bytes()) if kind == BLOCK_ENHANCED_PACKET]
+
+        assert struct.unpack_from("<I", classic, 12)[0] == 16
+        assert struct.unpack_from("<I", fd, 12)[0] == 72
+
+        record = fd[20:92]
+        assert record[4] == 32, "byte 4 is the payload length, not the DLC code"
+        assert record[5] & 0x04, "CANFD_FDF marks the record as FD"
+        assert record[5] & 0x01, "CANFD_BRS was asked for"
+        assert record[6] == record[7] == 0, "the reserved bytes are what make the flags trustworthy"
+        assert record[8:40] == bytes(range(32))
+
     def test_an_extended_frame_is_flagged_so_wireshark_reads_29_bits(self, tmp_path):
         path = tmp_path / "bus.pcapng"
         with canopen_core.PcapNgWriter(str(path), "virtual") as writer:
