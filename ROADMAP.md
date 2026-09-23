@@ -4,9 +4,27 @@ This document outlines the strategic engineering roadmap for **CANopen Studio**.
 
 ---
 
+## 📍 Where the project actually is
+
+**Current release: v0.8.1.** The compiled-engine transition this document was written to plan is **done**, a year ahead of the timeline below as it originally stood.
+
+| Delivered | Release | Notes |
+| :--- | :---: | :--- |
+| Rust core `canopen-core` with PyO3 bindings (Phase 1A) | v0.5.0 | Frames, SDO, PDO, NMT, EDS, ISO-TP, OBD-II, UDP transport, virtual simulator |
+| OBD-II diagnostics (SAE J1979), ELM327 and native ISO-TP backends | v0.5.0 | Vehicle profiles, gated writes, GUI tab, ten `obd_*` MCP tools |
+| DBC / EDS / DCF importer | v0.5.0 | EDS parser in Rust; DBC through the optional `cantools` extra |
+| Native Slint studio (Phase 1B, desktop) | v0.7.0 | Brought level with the Python studio: SDO download, PCAP-NG, VCD |
+| SLCAN transport in Rust | v0.7.0 | CANUSB, USBtin, CANable |
+| PCAP-NG export and Wireshark extcap | v0.7.0 | `LINKTYPE_CAN_SOCKETCAN`; buses appear in Wireshark's interface list |
+| VCD waveform export and bitstream decoder | v0.8.0 | Write a frame onto the wire and read one back off it, with CRC and ACK |
+
+Everything below that is not marked delivered is still ahead. The nearest items are **CAN FD**, **UDS over ISO-TP**, and **BLE** — the last of which gates the entire mobile port, since BLE is the only wireless path to an iPhone that does not require Apple MFi certification.
+
+---
+
 ## 🎯 Executive Summary & Strategic Priorities
 
-1. **High-Performance Core Engine (Preferred: Rust)**: Addressing architectural bottlenecks identified in the [baseline benchmarks](https://s-celles.github.io/canopen-studio/benchmarks/) (Python GIL contention, heap allocation per frame, timer jitter) to achieve microsecond-level determinism and handle > 500,000 frames/sec.
+1. **High-Performance Core Engine (Rust)** — ✅ **delivered in v0.5.0, native front end in v0.7.0**. Addressed the architectural bottlenecks identified in the [baseline benchmarks](https://s-celles.github.io/canopen-studio/benchmarks/) (Python GIL contention, heap allocation per frame, timer jitter). What remains here is protocol breadth, not architecture.
 2. **Mobile Deployment (Android & iOS)**: Porting the application to mobile smartphones using a shared cross-platform compiled core, supporting Bluetooth Low Energy (BLE), Wi-Fi UDP, and USB OTG.
 3. **Next-Generation Agentic AI Protocols**: Expanding beyond the existing **MCP (Model Context Protocol)** and **A2A (Agent-to-Agent)** servers to natively support emerging agentic interaction standards (**AG-UI**, **A2UI**, and **Agent Control Protocol - ACP**).
 4. **Automotive & Industrial Protocol Expansions**: Adding CANopen FD, UDS (ISO 14229) over ISO-TP, and automated DBC/EDS-driven decoding.
@@ -68,18 +86,18 @@ As documented in [`benchmarks.md`](https://s-celles.github.io/canopen-studio/ben
 
 ### 1.3. Migration Phases
 
-#### Phase 1A: Hybrid Architecture with Rust Extension (`PyO3`)
-* Implement a standalone Rust library (`canopen-core`) containing:
+#### Phase 1A: Hybrid Architecture with Rust Extension (`PyO3`) — ✅ delivered, v0.5.0
+* A standalone Rust library (`canopen-core`) containing:
   - CAN interface drivers (SocketCAN, native UDP unicast/multicast/broadcast, SLCAN parser).
   - High-speed trace ring buffer.
   - Latency tracker and 50 Hz SYNC generator with sub-millisecond precision.
 * Expose Python bindings via **PyO3** and **Maturin**.
 * The existing Tkinter GUI and MCP servers continue to run in Python, delegating heavy capture, decoding, and filtering to the compiled Rust extension.
 
-#### Phase 1B: Full Native Application
-* Transition the UI to a modern, lightweight GUI framework:
-  - **Option 1 (Slint / egui)**: Fully compiled native binary with GPU acceleration, sub-millisecond redraw latency, and zero web dependencies.
-  - **Option 2 (Tauri + Svelte/React)**: Native Rust backend with a flexible, modern web frontend for oscilloscope telemetry.
+#### Phase 1B: Full Native Application — ✅ delivered on desktop, v0.7.0
+* **Slint** was chosen over Tauri: a fully compiled native binary, no web dependencies, and the same toolchain later targets Android and iOS. It lives in `crates/canopen-gui`.
+* v0.7.0 brought it level with the Python studio where it had no reason to lag: SDO download, PCAP-NG and VCD export from the Rust sniffer, the Wireshark extcap, and the SLCAN serial transport.
+* Still Python-only, and deliberately so for now: the OBD-II tab, the MCP and A2A servers, and the telemetry plotter.
 
 ---
 
@@ -196,37 +214,83 @@ Mobile deployment uniquely enables field-service agentic features:
 
 ## 4. Protocol & Hardware Expansions
 
-| Feature | Target Milestone | Description |
+| Feature | Status | Description |
 | :--- | :---: | :--- |
-| **CANopen FD Support** | v0.4.0 | Support for flexible data-rate frames up to 64 bytes payload (CiA 1301). |
-| **UDS (ISO 14229) over ISO-TP** | v0.4.0 | Full automotive diagnostics session control, ECU flashing, and security access routines. |
-| **DBC / EDS / DCF Importer** | v0.3.5 | Import industry-standard database files to decode proprietary CAN frames into engineering units. |
-| **PCAP / PCAPng Export** | ✅ Delivered | PCAP-NG with `LINKTYPE_CAN_SOCKETCAN`, read natively by Wireshark and its CANopen / J1939 / ISO 15765 dissectors. `can-sniffer --pcap <file\|pipe>` writes a capture file, or streams live into a named pipe Wireshark is reading. |
-| **Edge ML Anomaly Detection** | v0.5.0 | Embedded ONNX runtime in the Rust core for local unsupervised anomaly detection on high-speed bus traffic. |
+| **DBC / EDS / DCF Importer** | ✅ v0.5.0 | EDS parser in the Rust core, generating PDO mappings straight from the TPDO/RPDO records. DBC through the optional `cantools` extra; a definition that cannot be expressed exactly is skipped with a reason rather than decoded into a plausible wrong number. |
+| **PCAP / PCAPng Export** | ✅ v0.7.0 | PCAP-NG with `LINKTYPE_CAN_SOCKETCAN`, read natively by Wireshark and its CANopen / J1939 / ISO 15765 dissectors. `can-sniffer --pcap <file\|pipe>` writes a capture file, or streams live into a named pipe Wireshark is reading. |
+| **Wireshark extcap** | ✅ v0.7.0 | `canopen-extcap` makes the studio's buses appear in Wireshark's own interface list on macOS and Windows. |
+| **VCD Export & Bitstream Decoder** | ✅ v0.8.0 | Reconstruct the waveform a frame would have made, for PulseView — and the inverse, turning bits a probe saw back into a frame, with CRC verification and the ACK slot read rather than assumed. |
+| **CAN FD Support** | 🚧 in progress | Flexible data-rate frames up to 64 bytes (ISO 11898-1). Groundwork landed: the core frame type carries FD payloads, the FD DLC encoding, BRS and ESI, and round-trips them through the `python-can` wire format. The layers that cannot yet handle a 64-byte frame refuse it explicitly rather than truncating it. PCAP-NG carries FD too, under the same `LINKTYPE_CAN_SOCKETCAN` — there is no separate FD link type; a reader tells the two apart by the record length and the `CANFD_FDF` flag. SLCAN carries FD as well, in the `d`/`D`/`b`/`B` dialect the CANable 2.0 firmware uses, and the FD CRC-17 and CRC-21 are implemented and checked against their published values. **Blocked on the standard — see below.** After that, CANopen FD (CiA 1301). Note there is no native SocketCAN transport in the Rust core to extend: SocketCAN reaches the studio through `python-can`. |
+| **UDS (ISO 14229) over ISO-TP** | ⏳ planned | Session control, security access and ECU flashing. Today only the *refusal* exists: `WriteDataByIdentifier` (0x2E), `RoutineControl` (0x31) and `InputOutputControlByIdentifier` (0x2F) are named and rejected with no request path, so enabling one is a deliberate change rather than an accident. |
+| **BLE Transport** | ⏳ planned | GATT Nordic UART Service. Gates the whole mobile port, and closes the gap that makes most OBD-II dongles sold today unusable with the studio. |
+| **Edge ML Anomaly Detection** | ⏳ planned | Embedded ONNX runtime in the Rust core for local unsupervised anomaly detection on high-speed bus traffic. |
+
+---
+
+### 4.1. CAN FD framing: what it is waiting on
+
+The bit-level FD framing is the one piece of CAN FD that is **blocked rather
+than merely unwritten**, and it is worth saying why so nobody picks it up and
+quietly gets it wrong.
+
+Four details decide whether a frame this crate builds matches one a controller
+builds. Every one of them survives a round trip against our own encoder: invert
+the parity and the bits still decode perfectly in our tests while matching
+nothing on a real bus. Round-trip testing, which is what the classic framing
+rests on, cannot catch a misread specification.
+
+| Detail | Status |
+| :--- | :--- |
+| Stuff count is Gray-coded with an **even** parity bit | confirmed |
+| The Gray mapping itself, count mod 8 → three transmitted bits | **unconfirmed** |
+| Fixed stuff bits take the complement of the preceding bit | confirmed |
+| The interval at which they are inserted through the CRC field | **unconfirmed** |
+| Whether the CRC covers the dynamic stuff bits as well as the data | **unconfirmed** |
+| The CRC register's initial value — ISO 11898-1:2015 seeds it with a leading one, the 2012 Bosch version with zero | **unconfirmed** |
+
+The CRC polynomials themselves are done and verified: CRC-17 and CRC-21 match
+the values the CRC catalogues publish for `"123456789"` (0x04F03 and 0x0ED841).
+CRC-15 is held to the same bar (0x059E). The seed is an argument to `crc_fd`
+rather than a constant precisely because it is the ISO/non-ISO fork.
+
+**What unblocks it:** ISO 11898-1:2015 §10.4.2 itself, a vendor application
+note carrying the full frame diagram (Kvaser, Vector, Bosch), or any bit-level
+capture of one real CAN FD frame. A single complete bit pattern pins all four
+at once.
+
+Until then the module documents the gap where the code would go, and the VCD
+writer refuses an FD frame rather than drawing one with the classic bit rules.
 
 ---
 
 ## 5. Milestone Timeline
 
-```text
-2026 Q3 (Current):
-  ├── v0.2.x: OBD-II Diagnostics, MCP Integration, Bus Latency & Jitter Monitor (Python baseline)
-  └── Baseline benchmarks documented (benchmarks.md)
+The engine work ran well ahead of the original plan: Phase 1A and Phase 1B both landed in 2026 Q3
+rather than 2026 Q4 and 2027 Q2. What follows is re-dated against that.
 
-2026 Q4:
-  ├── Phase 1A: Initial 'canopen-core' Rust crate with PyO3 bindings
-  ├── UDP Broadcast / Unicast high-speed engine in Rust
-  ├── Mobile transport layer in Rust: BLE (Nordic UART) & Wi-Fi UDP
-  └── MCP 2.0 streaming subscriptions for anomaly alerts
+```text
+2026 Q3 (done):
+  ├── v0.5.0: Phase 1A — 'canopen-core' Rust crate with PyO3 bindings
+  │           UDP broadcast / unicast / multicast engine in Rust
+  │           OBD-II (SAE J1979), EDS & DBC importers
+  ├── v0.6.1: MCP and A2A servers moved to an optional extra
+  ├── v0.7.0: Phase 1B — native Slint studio on desktop
+  │           SLCAN transport, PCAP-NG export, Wireshark extcap
+  └── v0.8.x: VCD export and bitstream decoder, slimmer deployed archive
+
+2026 Q4 (next):
+  ├── CAN FD: transports, PCAP-NG FD linktype, FD bitstream, CANopen FD (CiA 1301)
+  ├── BLE transport in the Rust core (GATT Nordic UART) — prerequisite for mobile
+  └── MCP streaming subscriptions: push anomaly alerts instead of polling
+      (heartbeat timeout, unexpected NMT state change, emergency telegrams)
 
 2027 Q1:
-  ├── Phase 2: AG-UI and A2UI streaming implementation
-  ├── Agent Control Protocol (ACP) support
-  ├── Android Alpha: USB OTG (CANable) + BLE + Wi-Fi UDP (Slint / Tauri v2)
-  └── CANopen FD & ISO-TP / UDS stack
+  ├── UDS (ISO 14229) over ISO-TP, behind the existing write gates
+  ├── Android Alpha: USB OTG (CANable) + BLE + Wi-Fi UDP, Slint on 'cargo apk'
+  └── AG-UI and A2UI streaming
 
 2027 Q2:
-  ├── Phase 1B: Standalone compiled native GUI application (Desktop Linux/macOS/Windows)
+  ├── Agent Control Protocol (ACP)
   └── iOS Alpha: BLE & Wi-Fi UDP with native iOS packaging
 
 2027 Q3+:

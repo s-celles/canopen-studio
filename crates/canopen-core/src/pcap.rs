@@ -24,7 +24,7 @@ use crate::frame::CanFrame;
 /// `LINKTYPE_CAN_SOCKETCAN`, as registered with tcpdump.org.
 pub const LINKTYPE_CAN_SOCKETCAN: u16 = 227;
 
-/// A SocketCAN record: 8 bytes of header followed by 8 of payload.
+/// A classic SocketCAN record: 8 bytes of header followed by 8 of payload.
 ///
 /// Classic CAN carries at most 8 bytes, but the record keeps all of them even
 /// when the DLC is shorter. That is what a real `libpcap` capture on Linux
@@ -32,9 +32,27 @@ pub const LINKTYPE_CAN_SOCKETCAN: u16 = 227;
 /// the path every reader already handles.
 pub const SOCKETCAN_RECORD_LEN: usize = 16;
 
-/// Announced capture length. 72 is 8 + 64: classic CAN never needs it, but the
-/// value survives the day the core grows CAN FD, and an over-wide snaplen
-/// costs nothing.
+/// A CAN FD record: the same 8-byte header followed by 64 of payload, which is
+/// Linux's `struct canfd_frame`.
+///
+/// There is no separate link type for FD. `LINKTYPE_CAN_SOCKETCAN` carries
+/// both, and a reader tells them apart by the record length — 16 against 72 —
+/// and by [`CANFD_FDF`] in the flags byte.
+pub const SOCKETCAN_FD_RECORD_LEN: usize = 72;
+
+// The flags byte at offset 5, from Linux's `linux/can.h`. It used to be
+// reserved, which is why a reader only trusts it when nothing outside these
+// three bits is set and the two bytes behind it are zero — an old capture left
+// them uninitialised.
+/// Bit Rate Switch: the data phase ran at the faster bit rate.
+pub const CANFD_BRS: u8 = 0x01;
+/// Error State Indicator: the transmitter was error-passive.
+pub const CANFD_ESI: u8 = 0x02;
+/// Marks the record as CAN FD rather than classic CAN.
+pub const CANFD_FDF: u8 = 0x04;
+
+/// Announced capture length. 72 is 8 + 64, the size of an FD record; a classic
+/// one needs only 16, and an over-wide snaplen costs nothing.
 const SNAPLEN: u32 = 72;
 
 // Flags riding in the top bits of the 32-bit identifier field.
@@ -62,7 +80,10 @@ const OPT_SHB_USERAPPL: u16 = 4;
 /// order, which left captures that only read back on the machine that made
 /// them; the registered link type settles on big-endian, so that is what we
 /// emit whatever the host does.
+/// Classic CAN only: the payload is capped at eight bytes, so an FD frame
+/// must be rejected by the caller rather than handed here.
 pub fn encode_socketcan(frame: &CanFrame) -> [u8; SOCKETCAN_RECORD_LEN] {
+    debug_assert!(!frame.is_fd, "encode_socketcan is classic CAN only");
     let mut id = if frame.is_extended {
         (frame.id & EXTENDED_ID_MASK) | EFF_FLAG
     } else {
@@ -88,6 +109,51 @@ pub fn encode_socketcan(frame: &CanFrame) -> [u8; SOCKETCAN_RECORD_LEN] {
         let payload = usize::from(len);
         record[8..8 + payload].copy_from_slice(&frame.data[..payload]);
     }
+
+    record
+}
+
+/// Encode one CAN FD frame as a SocketCAN record — Linux's `struct canfd_frame`.
+///
+/// Same 8-byte header as the classic record, then 64 bytes of payload instead
+/// of 8. Byte 4 carries the payload *length*, not the 4-bit DLC code: the wire
+/// code is an FD detail the capture format does not repeat. Byte 5 carries the
+/// flags, and the two bytes behind it stay zero — a reader only trusts the
+/// flags byte when they are, because it was reserved and older captures left
+/// it uninitialised.
+///
+/// CAN FD has no remote frame, so `RTR_FLAG` never appears here.
+pub fn encode_socketcan_fd(frame: &CanFrame) -> [u8; SOCKETCAN_FD_RECORD_LEN] {
+    debug_assert!(frame.is_fd, "encode_socketcan_fd is CAN FD only");
+
+    let mut id = if frame.is_extended {
+        (frame.id & EXTENDED_ID_MASK) | EFF_FLAG
+    } else {
+        frame.id & STANDARD_ID_MASK
+    };
+    if frame.is_error {
+        id |= ERR_FLAG;
+    }
+
+    let mut record = [0u8; SOCKETCAN_FD_RECORD_LEN];
+    record[0..4].copy_from_slice(&id.to_be_bytes());
+
+    let len = frame.dlc.min(64);
+    record[4] = len;
+
+    let mut flags = CANFD_FDF;
+    if frame.bitrate_switch {
+        flags |= CANFD_BRS;
+    }
+    if frame.error_state_indicator {
+        flags |= CANFD_ESI;
+    }
+    record[5] = flags;
+    // Bytes 6 and 7 stay zero, which is what tells a reader the flags byte is
+    // meant rather than left over.
+
+    let payload = usize::from(len);
+    record[8..8 + payload].copy_from_slice(&frame.data[..payload]);
 
     record
 }
@@ -221,19 +287,32 @@ impl<W: Write> PcapNgWriter<W> {
         Ok(writer)
     }
 
-    /// Append one frame.
+    /// Append one frame, classic CAN or CAN FD.
+    ///
+    /// Both go out under the same link type: the record length is what tells
+    /// them apart to a reader, so the block's captured and original lengths
+    /// carry the distinction and must not be rounded to a common size.
     pub fn write_frame(&mut self, frame: &CanFrame) -> io::Result<()> {
-        let record = encode_socketcan(frame);
+        let fd_record;
+        let classic_record;
+        let record: &[u8] = if frame.is_fd {
+            fd_record = encode_socketcan_fd(frame);
+            &fd_record
+        } else {
+            classic_record = encode_socketcan(frame);
+            &classic_record
+        };
+        let record_len = record.len() as u32;
 
-        let mut body = Vec::with_capacity(20 + SOCKETCAN_RECORD_LEN);
+        let mut body = Vec::with_capacity(20 + record.len());
         body.extend_from_slice(&0u32.to_le_bytes()); // interface id
         // The timestamp is one 64-bit count of microseconds since the epoch,
         // split across two words. `if_tsresol` below says which unit it is in.
         body.extend_from_slice(&((frame.timestamp_us >> 32) as u32).to_le_bytes());
         body.extend_from_slice(&((frame.timestamp_us & 0xFFFF_FFFF) as u32).to_le_bytes());
-        body.extend_from_slice(&(SOCKETCAN_RECORD_LEN as u32).to_le_bytes()); // captured
-        body.extend_from_slice(&(SOCKETCAN_RECORD_LEN as u32).to_le_bytes()); // original
-        body.extend_from_slice(&record);
+        body.extend_from_slice(&record_len.to_le_bytes()); // captured
+        body.extend_from_slice(&record_len.to_le_bytes()); // original
+        body.extend_from_slice(record);
 
         self.write_block(BLOCK_ENHANCED_PACKET, &body)?;
         self.sink.flush()
@@ -316,6 +395,28 @@ mod tests {
         f
     }
 
+    fn read_be_u32(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_be_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    /// Where each enhanced packet block starts, by walking the block chain.
+    fn packet_block_offsets(buf: &[u8]) -> Vec<usize> {
+        let mut offsets = Vec::new();
+        let mut at = 0usize;
+        while at + 8 <= buf.len() {
+            let kind = read_u32(buf, at);
+            let total = read_u32(buf, at + 4) as usize;
+            if total == 0 {
+                break;
+            }
+            if kind == BLOCK_ENHANCED_PACKET {
+                offsets.push(at);
+            }
+            at += total;
+        }
+        offsets
+    }
+
     fn read_u32(bytes: &[u8], offset: usize) -> u32 {
         u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
     }
@@ -371,6 +472,78 @@ mod tests {
         assert_eq!(record.len(), 16);
         assert_eq!(record[4], 1, "the length field still names one byte");
         assert_eq!(&record[9..16], &[0u8; 7], "the rest is zero padding");
+    }
+
+    fn fd_frame(id: u32, payload: &[u8]) -> CanFrame {
+        let mut f = CanFrame::new_fd(id, payload, 0).expect("payload is a legal FD length");
+        f.timestamp_us = 0x0000_0001_2345_6789;
+        f
+    }
+
+    #[test]
+    fn an_fd_record_is_seventy_two_bytes_and_says_so_in_its_flags() {
+        // There is no separate link type for FD: a reader tells the two apart
+        // by the record length and this flag bit.
+        let record = encode_socketcan_fd(&fd_frame(0x123, &[0xAA; 64]));
+        assert_eq!(record.len(), 72);
+        assert_eq!(record[4], 64, "byte 4 is the length, not the DLC code");
+        assert_eq!(record[5] & CANFD_FDF, CANFD_FDF);
+    }
+
+    #[test]
+    fn the_two_bytes_behind_the_flags_stay_zero_so_a_reader_trusts_them() {
+        // Those bytes were reserved, and older captures left them
+        // uninitialised, so Wireshark only believes the flags byte when they
+        // are zero and nothing outside the three defined bits is set.
+        let mut f = fd_frame(0x7DF, &[0x11; 12]);
+        f.bitrate_switch = true;
+        f.error_state_indicator = true;
+        let record = encode_socketcan_fd(&f);
+
+        assert_eq!(record[6], 0);
+        assert_eq!(record[7], 0);
+        assert_eq!(record[5], CANFD_FDF | CANFD_BRS | CANFD_ESI);
+        assert_eq!(record[5] & !(CANFD_FDF | CANFD_BRS | CANFD_ESI), 0);
+    }
+
+    #[test]
+    fn an_fd_record_keeps_the_identifier_rules_of_the_classic_one() {
+        let mut f = fd_frame(0x18DAF110, &[0x01, 0x02, 0x03, 0x04]);
+        f.is_extended = true;
+        let record = encode_socketcan_fd(&f);
+        assert_eq!(read_be_u32(&record, 0), 0x18DAF110 | EFF_FLAG);
+
+        let standard = encode_socketcan_fd(&fd_frame(0x123, &[]));
+        assert_eq!(read_be_u32(&standard, 0), 0x123);
+    }
+
+    #[test]
+    fn a_short_fd_payload_is_zero_padded_to_the_full_sixty_four() {
+        // The record is `struct canfd_frame` whole, exactly as a Linux capture
+        // dumps it, so the length field is what bounds the payload.
+        let record = encode_socketcan_fd(&fd_frame(0x100, &[0xEE; 12]));
+        assert_eq!(record[4], 12);
+        assert_eq!(&record[8..20], &[0xEE; 12]);
+        assert!(record[20..72].iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn a_capture_gives_each_frame_the_length_its_format_needs() {
+        // The lengths in the packet block are the only thing distinguishing
+        // the two records, so rounding them to one size would make every FD
+        // frame unreadable.
+        let mut buf = Vec::new();
+        {
+            let mut writer = PcapNgWriter::new(&mut buf, "test0").unwrap();
+            writer.write_frame(&frame(0x123, &[0x01, 0x02])).unwrap();
+            writer.write_frame(&fd_frame(0x124, &[0x03; 32])).unwrap();
+        }
+
+        let lengths: Vec<u32> = packet_block_offsets(&buf)
+            .into_iter()
+            .map(|at| read_u32(&buf, at + 8 + 16))
+            .collect();
+        assert_eq!(lengths, vec![16, 72]);
     }
 
     #[test]

@@ -58,6 +58,47 @@ class TestRustCanFrame:
         assert decoded.data == b"\x00"
         assert decoded.timestamp_us == 50000
 
+    def test_an_fd_frame_carries_a_payload_classic_can_cannot(self):
+        payload = bytes(range(64))
+        frame = canopen_core.CanFrame(0x123, payload, is_fd=True, bitrate_switch=True)
+
+        assert frame.is_fd
+        assert frame.bitrate_switch
+        assert frame.dlc == 64
+        # The wire code is not the length: 64 bytes travel under code 15.
+        assert frame.dlc_code == 15
+        assert frame.data == payload
+
+    def test_an_fd_length_the_format_cannot_express_is_refused(self):
+        # Nine bytes is the first length CAN FD has no DLC code for. Padding it
+        # is the caller's decision, because the pad bytes arrive as data.
+        with pytest.raises(ValueError, match="CAN FD data length"):
+            canopen_core.CanFrame(0x123, bytes(9), is_fd=True)
+
+    def test_fd_survives_the_python_can_wire_format(self):
+        payload = bytes(range(48))
+        orig = canopen_core.CanFrame(
+            0x18DAF110, payload, timestamp_us=1700000000000000, is_fd=True, bitrate_switch=True
+        )
+        decoded = canopen_core.CanFrame.from_msgpack(orig.to_msgpack())
+
+        assert decoded.is_fd
+        assert decoded.bitrate_switch
+        assert decoded.dlc == 48
+        assert decoded.data == payload
+
+    def test_an_fd_frame_spends_eighty_compact_bytes_and_a_classic_one_still_twenty_four(self):
+        classic = canopen_core.CanFrame(0x180, b"\x00\x01\x02", timestamp_us=7)
+        fd = canopen_core.CanFrame(0x180, bytes(range(32)), timestamp_us=7, is_fd=True)
+
+        assert len(classic.to_compact()) == 24
+        assert len(fd.to_compact()) == 80
+
+        decoded = canopen_core.CanFrame.from_compact(fd.to_compact())
+        assert decoded.is_fd
+        assert decoded.data == bytes(range(32))
+        assert decoded.timestamp_us == 7
+
 
 @pytest.mark.skipif(not RUST_CORE_AVAILABLE, reason="Rust canopen_core module not compiled")
 class TestRustLatencyTracker:
