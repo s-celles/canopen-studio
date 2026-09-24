@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-24
+
+This release exists to publish. **v0.8.1 never produced any binaries**: its
+release workflow died at `Install dependencies`, as did every CI and
+documentation run since, because the dev group had gained a dependency
+resolving from a private repository that the runners cannot clone. The fix
+landed on `main` but a tag already cut does not replay, so the artifacts for
+0.8.1 were never built. This tag carries them, together with everything merged
+since.
+
+### Fixed
+- **Every workflow was red**, on every push, since `simple-apps-deployment` was declared in the `dev` dependency group. It resolves from a private repository, `uv sync` installs `dev` by default, and the runners have no credentials for it, so CI, the documentation deploy and the release build all stopped before compiling anything. Moving it to another group would not have helped — uv resolves every dependency group when it locks, whichever one the entry sits in — so it leaves the project metadata entirely, and `scripts/bundle_app.py` documents `uv run --with git+...` instead. It is a tool one maintainer runs to publish to a share, not something the studio imports or CI ever touches.
+
 ### Added
 - **CAN FD groundwork in the core frame type** (ISO 11898-1). `CanFrame` carries payloads up to 64 bytes and the three things that distinguish an FD frame from a classic one: `is_fd`, `bitrate_switch` and `error_state_indicator`. The FD DLC encoding comes with it — `fd_dlc_code`, `fd_length_for_code` and `fd_padded_length` — because on FD the wire code is not the length: 64 bytes travel under code 15, and the format can only name 0..=8, 12, 16, 20, 24, 32, 48 and 64. A payload of nine bytes is refused rather than padded silently, since the pad bytes reach the receiver as data and only the caller knows what they should be.
 - `python-can` interoperability for FD. The MessagePack encoder used to write `is_fd: false` unconditionally and the decoder dropped the three FD fields, so an FD frame round-tripped through Python came back classic. Both directions now carry them.
