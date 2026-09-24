@@ -9,7 +9,7 @@ members = [
 [workspace.package]
 # Keep in step with canopen_studio.__version__, which the release workflow
 # reads to version the installer. tests/test_version_consistency.py enforces it.
-version = "0.8.1"
+version = "0.8.2"
 edition = "2024"
 authors = ["Sébastien Celles <s.celles@gmail.com>"]
 license = "GPL-3.0-or-later"
