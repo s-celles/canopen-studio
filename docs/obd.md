@@ -132,6 +132,10 @@ UART service — and otherwise accepts a custom service with exactly one notify 
 write characteristic. When none fits, the error lists what the device offers; pass
 `notify_uuid` and `write_uuid` to name them yourself.
 
+For a first contact, `just obd-ble-check` talks to the adapter alone — AT commands the
+chip answers itself, so nothing reaches the vehicle and the ignition can stay off. With
+`--vehicle` it adds read-only requests: identification and a count of trouble codes.
+
 A BLE peripheral serves one central at a time: close any phone app still connected to
 the adapter first. In the studio, choose **ELM327 — Bluetooth LE**; leave the port field
 blank to take the first adapter found. Over MCP, use `transport="elm327_ble"` with

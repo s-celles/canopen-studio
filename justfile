@@ -94,6 +94,11 @@ test-emulator:
 emulator scenario="car" port="35000":
     uv run --with ELM327-emulator python -m elm -n {{port}} -s {{scenario}}
 
+# Stage 1 talks to the adapter alone; --vehicle adds read-only requests (--device OBDII, --protocol 6)
+# First contact with a Bluetooth LE ELM327, harmless to the vehicle (e.g. just obd-ble-check --vehicle)
+obd-ble-check *args:
+    uv run --extra ble python scripts/obd_ble_check.py {{args}}
+
 # Import a Torque Pro custom-PID CSV into a vehicle profile (e.g. just import-torque pids.csv my_car)
 import-torque file profile_id:
     uv run python -c "from canopen_studio.diag.profiles.importers import import_torque_csv; import sys, yaml; r = import_torque_csv('{{file}}', '{{profile_id}}'); print(r); [print(' skipped:', s) for s in r.skipped]"

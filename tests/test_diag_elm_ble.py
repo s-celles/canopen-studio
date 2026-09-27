@@ -56,13 +56,15 @@ def fff0_table(write_props=("write-without-response", "write")):
 class FakeAdapter:
     """What the fake radio can see: one device, its advertisement and its GATT table."""
 
-    def __init__(self, name="OBDII", address="AA:BB:CC:DD:EE:FF", services=None, advertised=(FFF0,)):
+    def __init__(self, name="OBDII", address="AA:BB:CC:DD:EE:FF", services=None, advertised=(FFF0,), answer=None):
         self.device = SimpleNamespace(address=address, name=name)
         self.advertisement = SimpleNamespace(local_name=name, service_uuids=list(advertised))
         self.services = services if services is not None else fff0_table()
         self.writes = []
         self.connected = False
         self.client = None
+        # What the chip says to a command, before the prompt; OK to everything by default.
+        self.answer = answer or (lambda command: b"OK")
 
 
 def install(monkeypatch, *adapters):
@@ -105,7 +107,7 @@ def install(monkeypatch, *adapters):
             if bytes(data).endswith(b"\r"):
                 command = b"".join(self.adapter.writes).strip()
                 self.adapter.writes.clear()
-                self.callback(None, bytearray(command + b"\rOK\r\r>"))
+                self.callback(None, bytearray(command + b"\r" + self.adapter.answer(command) + b"\r\r>"))
 
         async def disconnect(self):
             self.adapter.connected = False
