@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("tkinter", reason="GUI module requires the tkinter bindings")
 
 from canopen_studio.diag import DiagnosticError, WRITE_ENABLED_ENV  # noqa: E402
+from canopen_studio.diag.elm327.ble import BleElmTransport  # noqa: E402
 from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface  # noqa: E402
 from canopen_studio.diag.elm327.transport import (  # noqa: E402
     DEFAULT_BAUDRATE,
@@ -97,6 +98,20 @@ class TestTcpAdapter:
         session, _ = build(make_app(), "elm327_tcp", rate="35001")
 
         assert session.transport.port == 35001
+
+
+class TestBleAdapter:
+    def test_a_bluetooth_le_choice_builds_a_ble_session(self):
+        session, source = build(make_app(), "elm327_ble", port="OBDII")
+
+        assert isinstance(session.transport, BleElmTransport)
+        assert session.transport.device == "OBDII"
+        assert source is None
+
+    def test_a_blank_device_means_the_first_adapter_found(self):
+        session, _ = build(make_app(), "elm327_ble", port="")
+
+        assert session.transport.device is None
 
 
 class TestNativeAdapter:

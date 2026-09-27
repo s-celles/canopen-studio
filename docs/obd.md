@@ -23,7 +23,7 @@ sit behind it and callers cannot tell them apart.
 
 | | `ElmDiagnosticInterface` | `NativeCanDiagnosticInterface` |
 |---|---|---|
-| Hardware | Any ELM327 — USB, Bluetooth SPP, Wi-Fi | SLCAN, PCAN, Kvaser, Vector, IXXAT, gs_usb, SocketCAN, virtual |
+| Hardware | Any ELM327 — USB, Bluetooth SPP, Bluetooth LE, Wi-Fi | SLCAN, PCAN, Kvaser, Vector, IXXAT, gs_usb, SocketCAN, virtual |
 | Protocol detection | Done by the adapter | You set the bitrate and addressing |
 | ISO-TP | Adapter handles flow control; the studio reassembles | Fully implemented in the studio |
 | Wiring | Plugs into the OBD-II port | Needs CAN-H/CAN-L on pins 6 and 14 |
@@ -107,11 +107,35 @@ Wi-Fi clones listen on port 35000, and so does the test emulator:
 TcpElmTransport("192.168.0.10", 35000)
 ```
 
-!!! warning "Bluetooth Low Energy is not supported"
-    BLE adapters expose a GATT service rather than a serial port, with a vendor-specific
-    characteristic pair and no standard profile to bind against. Supporting them means a
-    `bleak` dependency and per-vendor handling. Use a USB, a classic Bluetooth SPP, or a
-    Wi-Fi adapter instead.
+### Bluetooth Low Energy
+
+Adapters sold as "Bluetooth 4.0" or "iPhone compatible" are BLE: they expose a GATT
+service rather than a serial port, so there is nothing to pair or bind. They need the
+optional `bleak` dependency:
+
+```bash
+pip install 'canopen-studio[ble]'   # or: uv sync --extra ble
+```
+
+```python
+from canopen_studio.diag.elm327 import BleElmTransport, scan_ble_adapters
+
+scan_ble_adapters()  # [("AA:BB:CC:DD:EE:FF", "OBDII"), ...]
+BleElmTransport()  # the first adapter that looks like one
+BleElmTransport("OBDII")  # a fragment of the advertised name
+BleElmTransport("AA:BB:CC:DD:EE:FF")  # an address (a UUID on macOS)
+```
+
+Every vendor picked its own characteristics. The transport recognises the common
+layouts — `FFF0`/`FFF1`/`FFF2`, the HM-10 `FFE0`/`FFE1`, Vgate's `18F0`, and the Nordic
+UART service — and otherwise accepts a custom service with exactly one notify and one
+write characteristic. When none fits, the error lists what the device offers; pass
+`notify_uuid` and `write_uuid` to name them yourself.
+
+A BLE peripheral serves one central at a time: close any phone app still connected to
+the adapter first. In the studio, choose **ELM327 — Bluetooth LE**; leave the port field
+blank to take the first adapter found. Over MCP, use `transport="elm327_ble"` with
+`ble_device`.
 
 ### Native CAN
 

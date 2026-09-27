@@ -22,6 +22,9 @@ dependencies = [
 # Importing manufacturer signal definitions from a DBC database. Optional because the
 # generic J1979 profile, and every profile written by hand, works without it.
 dbc = ["cantools>=39.0"]
+# Bluetooth LE ELM327 adapters, the kind sold as iPhone-compatible. Optional because
+# USB, classic Bluetooth and Wi-Fi adapters need nothing beyond pyserial.
+ble = ["bleak>=0.22"]
 # The MCP and A2A servers, which let an agent drive the analyser. Optional because
 # `gui.py` already imports them inside a `try`/`except ImportError` and runs with
 # `_SERVERS_AVAILABLE = False` when they are absent — nothing on a bench needs an

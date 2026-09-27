@@ -5,7 +5,7 @@ An ELM327 is a modem-like device: bytes in, ASCII out, terminated by a '>' promp
 classes carry the bytes and nothing else — framing, the AT dialogue and the error
 taxonomy all live in `protocol.py`, which keeps the transports trivial to fake.
 
-Three ways to reach one are supported, all of them byte streams:
+Three ways to reach one are covered here, all of them byte streams:
 
 USB
     A CDC-ACM or FTDI serial port: `/dev/ttyUSB0`, `COM4`. The common case.
@@ -19,10 +19,9 @@ TCP
     Wi-Fi ELM327 clones expose port 35000, and the ELM327 emulator used by the test
     suite exposes the same interface with its `-n` option.
 
-Bluetooth Low Energy is **not supported**. BLE adapters expose a GATT service rather than
-a serial port, with a vendor-specific characteristic pair and no standard profile to bind
-against; they need a `bleak` dependency and per-vendor handling. Use a USB, a classic
-Bluetooth SPP, or a Wi-Fi adapter instead.
+Bluetooth Low Energy is not a byte stream at the operating-system level — the adapter
+exposes a GATT service rather than a serial port — so it lives apart, in `ble.py`, behind
+the optional `bleak` dependency.
 """
 
 from __future__ import annotations
