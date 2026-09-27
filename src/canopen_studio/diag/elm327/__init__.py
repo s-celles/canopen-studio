@@ -11,6 +11,7 @@ License: GNU General Public License v3.0 (GPL-3.0-or-later)
 Copyright (C) 2026 Sébastien Celles
 """
 
+from .ble import BleElmTransport, scan_ble_adapters
 from .capabilities import ElmCapabilities, probe_capabilities
 from .interface import ElmDiagnosticInterface, UnsupportedElmProtocol
 from .protocol import (
@@ -34,6 +35,7 @@ from .transport import (
 )
 
 __all__ = [
+    "BleElmTransport",
     "DEFAULT_BAUDRATE",
     "ElmBufferFull",
     "ElmBusError",
@@ -49,6 +51,7 @@ __all__ = [
     "UnsupportedElmProtocol",
     "clean_reply",
     "probe_capabilities",
+    "scan_ble_adapters",
     "DEFAULT_TCP_PORT",
     "ElmTransport",
     "SerialElmTransport",

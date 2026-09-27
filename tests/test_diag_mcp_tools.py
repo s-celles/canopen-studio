@@ -140,6 +140,16 @@ class TestConnecting:
         assert result["connected"] is False
         assert "unknown transport" in result["error"]
 
+    def test_a_bluetooth_le_transport_builds_a_ble_session(self):
+        from canopen_studio.diag.elm327.ble import BleElmTransport
+
+        session, _ = tools._build_session(
+            "elm327_ble", "", 38400, "", 35000, "0", "socketcan", "can0", 500000, ble_device="Vgate"
+        )
+
+        assert isinstance(session.transport, BleElmTransport)
+        assert session.transport.device == "Vgate"
+
     def test_a_failure_leaves_no_session_behind(self):
         tools.obd_connect(transport="elm327", port="/dev/does-not-exist")
 

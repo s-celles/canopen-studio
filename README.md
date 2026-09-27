@@ -24,7 +24,7 @@
 - **Wireshark & PulseView Export**: PCAP-NG capture (file or live named pipe, read natively by Wireshark's CANopen / J1939 / ISO 15765 dissectors) and a reconstructed VCD waveform for sigrok.
 - **Real Bus Network Bridge**: Mirror a physical CAN bus onto a UDP multicast group so remote machines observe the live traffic as if they were wired to it.
 - **AI Agent Integration**: MCP and A2A servers expose the bus to an agent — read the trace, inspect nodes, transmit frames, drive the NMT state machine.
-- **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle, never assumed; declarative vehicle profiles with inheritance; read-only by default.
+- **OBD-II Vehicle Diagnostics (SAE J1979)**: Live parameters, trouble codes and VIN over an ELM327 (USB, Bluetooth SPP, Bluetooth LE, Wi-Fi) or straight over a native CAN adapter via ISO-TP. Supported PIDs are discovered from the vehicle, never assumed; declarative vehicle profiles with inheritance; read-only by default.
 - **In-App Updater**: Automated background checks against GitHub Releases and 1-click upgrade.
 
 ---

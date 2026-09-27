@@ -28,6 +28,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from .elm327.interface import ElmDiagnosticInterface
+from .elm327.ble import BleElmTransport
 from .elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from .interface import DiagnosticError, DiagnosticInterface
 from .j1979.client import J1979Client
@@ -100,6 +101,7 @@ def obd_connect(
     baudrate: int = DEFAULT_BAUDRATE,
     host: str = "192.168.0.10",
     tcp_port: int = DEFAULT_TCP_PORT,
+    ble_device: Optional[str] = None,
     protocol: str = "0",
     interface: str = "socketcan",
     channel: str = "can0",
@@ -110,12 +112,15 @@ def obd_connect(
 
     Args:
         transport: How to reach the vehicle — "elm327" for a serial or Bluetooth SPP
-            adapter, "elm327_tcp" for a Wi-Fi adapter or emulator, "native" to speak
+            adapter, "elm327_tcp" for a Wi-Fi adapter or emulator, "elm327_ble" for a
+            Bluetooth Low Energy adapter (needs the `ble` extra), "native" to speak
             ISO-TP over one of the studio's own CAN adapters.
         port: Serial device for transport="elm327", e.g. /dev/ttyUSB0, /dev/rfcomm0, COM4.
         baudrate: Serial line rate. 38400 suits most adapters; try 9600 for an old board.
         host: Address for transport="elm327_tcp".
         tcp_port: TCP port for transport="elm327_tcp", 35000 by convention.
+        ble_device: For transport="elm327_ble", the adapter's address or a fragment of
+            its advertised name. Omit to take the first adapter that looks like one.
         protocol: ELM327 protocol number, or "0" to autodetect. Forcing the right one
             skips the search delay on the first request.
         interface: CAN adapter key for transport="native" — socketcan, slcan, pcan,
@@ -132,7 +137,7 @@ def obd_connect(
 
     try:
         session, source = _build_session(
-            transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate
+            transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device
         )
         session.open()
     except Exception as exc:
@@ -165,7 +170,7 @@ def obd_connect(
     }
 
 
-def _build_session(transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate):
+def _build_session(transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device=None):
     """Build the session a transport name asks for, without opening it yet."""
     kind = str(transport).strip().lower()
 
@@ -175,6 +180,9 @@ def _build_session(transport, port, baudrate, host, tcp_port, protocol, interfac
     if kind in ("elm327_tcp", "tcp", "wifi"):
         return ElmDiagnosticInterface(TcpElmTransport(host, tcp_port), protocol=protocol), None
 
+    if kind in ("elm327_ble", "ble", "bluetooth_le"):
+        return ElmDiagnosticInterface(BleElmTransport(ble_device), protocol=protocol), None
+
     if kind in ("native", "can", "isotp"):
         if _app_ref is not None and getattr(_app_ref, "bus", None) is not None:
             # Borrow the bus the application already owns, and take frames from its
@@ -183,7 +191,7 @@ def _build_session(transport, port, baudrate, host, tcp_port, protocol, interfac
             return NativeCanDiagnosticInterface(_app_ref.bus, source=source), source
         return NativeCanDiagnosticInterface.open_bus(interface, channel, bitrate), None
 
-    raise DiagnosticError(f"unknown transport {transport!r}; expected elm327, elm327_tcp or native")
+    raise DiagnosticError(f"unknown transport {transport!r}; expected elm327, elm327_tcp, elm327_ble or native")
 
 
 def obd_disconnect() -> str:

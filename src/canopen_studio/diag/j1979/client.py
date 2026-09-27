@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from ..interface import DiagnosticInterface, DiagnosticResponse
+from ..interface import DiagnosticError, DiagnosticInterface, DiagnosticResponse, TransportError
 from .discovery import SupportedPids, discover_supported_pids
 from .dtc import DTC_MODES, TroubleCode, decode_dtc_response, sort_codes, summarise
 from .pids import MODE_CURRENT_DATA, MODE_VEHICLE_INFO, PidDefinition, PidError, PidTable, PidValue
@@ -141,6 +141,11 @@ class J1979Client:
             An unsupported PID is an ordinary outcome, so it does not raise.
         """
         definition = self.table.get(mode, pid) or PidDefinition(mode=mode, pid=pid, name=f"pid_{mode:02x}_{pid:02x}")
+        return self._read_with(definition, timeout)
+
+    def _read_with(self, definition: PidDefinition, timeout: Optional[float]) -> List[PidValue]:
+        """Request one PID and decode every ECU's answer with `definition`."""
+        mode, pid = definition.mode, definition.pid
         readings = []
         for reply in self.interface.positive_responses(mode, pid, timeout=timeout):
             data = self._payload_after_echo(reply, pid)
@@ -287,7 +292,13 @@ class J1979Client:
                 vin_info = None
 
         obd_standard = None
-        standard_readings = self.read_pid(0x1C, MODE_CURRENT_DATA, timeout=timeout) if 0x1C in supported else []
+        standard_readings = []
+        if 0x1C in supported:
+            # Identification runs before a profile has supplied a table — its result is what
+            # picks the profile — so the label comes from the generic J1979 one.
+            definition = self.table.get(MODE_CURRENT_DATA, 0x1C) or _base_definition(MODE_CURRENT_DATA, 0x1C)
+            if definition is not None:
+                standard_readings = self._read_with(definition, timeout)
         if standard_readings:
             obd_standard = str(standard_readings[0].value)
 
@@ -295,13 +306,29 @@ class J1979Client:
             vin=vin,
             vin_info=vin_info,
             ecus=list(supported.ecus),
-            ecu_names=self.read_text_info(PID_ECU_NAME, timeout=timeout),
-            calibration_ids=self.read_text_info(PID_CALIBRATION_ID, timeout=timeout),
+            ecu_names=self._optional_text_info(PID_ECU_NAME, timeout),
+            calibration_ids=self._optional_text_info(PID_CALIBRATION_ID, timeout),
             supported_pids=supported,
             obd_standard=obd_standard,
         )
 
     # -- Internals ---------------------------------------------------------
+
+    def _optional_text_info(self, pid: int, timeout: Optional[float]) -> Dict[int, str]:
+        """
+        Read a textual mode 09 parameter that identification can do without.
+
+        ECU names and calibration identifiers refine a match; the VIN and the supported
+        PIDs make it. When several ECUs answer at once, a cheap ELM327 clone can
+        overflow its buffer on these long multi-frame replies — so a failure here costs
+        the refinement, not the session. A lost link is still a lost link, and is raised.
+        """
+        try:
+            return self.read_text_info(pid, timeout=timeout)
+        except TransportError:
+            raise
+        except DiagnosticError:
+            return {}
 
     @staticmethod
     def _payload_after_echo(reply: DiagnosticResponse, pid: int) -> Optional[bytes]:
@@ -315,3 +342,15 @@ class J1979Client:
         if not payload or payload[0] != pid:
             return None
         return payload[1:]
+
+
+def _base_definition(mode: int, pid: int) -> Optional[PidDefinition]:
+    """A PID as the generic J1979 profile defines it, or None if it cannot be loaded."""
+    # Imported here: the profile package builds on this module.
+    from ..profiles.library import ProfileLibrary
+
+    try:
+        return ProfileLibrary().load().base().table.get(mode, pid)
+    except Exception:
+        # Without the bundled data the label is lost, not the identification.
+        return None

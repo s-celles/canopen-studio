@@ -41,8 +41,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y python3-tk libxcb-xinerama0 libfontconfig1-dev pkg-config
 
+      # The ble extra puts bleak in the bundle, for Bluetooth LE OBD-II adapters.
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --extra ble
 
       # Without this the published binaries ship with no canopen_core at all.
       # uv sync cannot produce it — the build backend is plain setuptools and the

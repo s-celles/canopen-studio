@@ -51,6 +51,7 @@ from canopen_studio.bridge import CanBridge
 from canopen_studio.latency import LatencyTracker
 from canopen_studio.diag import DiagnosticError, DiagnosticWriteRefused, WriteGate, clear_trouble_codes
 from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
+from canopen_studio.diag.elm327.ble import BleElmTransport
 from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from canopen_studio.diag.j1979.client import J1979Client
 from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource
@@ -1258,6 +1259,7 @@ class CanStudioApp(tk.Tk):
             values=[
                 "ELM327 — serial / Bluetooth SPP",
                 "ELM327 — Wi-Fi / TCP",
+                "ELM327 — Bluetooth LE",
                 "Native CAN (ISO-TP over the connected bus)",
             ],
             state="readonly",
@@ -1396,6 +1398,11 @@ class CanStudioApp(tk.Tk):
             self.obd_rate_label.configure(text="TCP port:")
             self._obd_set_entry(self.obd_port_entry, "192.168.0.10")
             self._obd_set_entry(self.obd_rate_entry, str(DEFAULT_TCP_PORT))
+        elif kind == "elm327_ble":
+            # Blank means the first adapter found; a name fragment or address narrows it.
+            self.obd_rate_label.configure(text="(unused)")
+            self._obd_set_entry(self.obd_port_entry, "")
+            self._obd_set_entry(self.obd_rate_entry, "")
         else:
             self.obd_rate_label.configure(text="(unused)")
             self._obd_set_entry(self.obd_port_entry, "(uses the connected bus)")
@@ -1409,7 +1416,7 @@ class CanStudioApp(tk.Tk):
     def _obd_transport_kind(self) -> str:
         """Which adapter the combobox is on, as the key the session builder uses."""
         index = self.obd_transport_combo.current()
-        return ("elm327", "elm327_tcp", "native")[index if index >= 0 else 0]
+        return ("elm327", "elm327_tcp", "elm327_ble", "native")[index if index >= 0 else 0]
 
     def _obd_selected_profile(self) -> Optional[str]:
         """The profile chosen by hand, or None to resolve automatically."""
@@ -1435,6 +1442,9 @@ class CanStudioApp(tk.Tk):
         if kind == "elm327_tcp":
             tcp_port = int(rate) if str(rate).strip() else DEFAULT_TCP_PORT
             return ElmDiagnosticInterface(TcpElmTransport(port, tcp_port), protocol=protocol), None
+
+        if kind == "elm327_ble":
+            return ElmDiagnosticInterface(BleElmTransport(port), protocol=protocol), None
 
         if kind == "native":
             if self.bus is None:
