@@ -647,6 +647,13 @@ pub struct PyIsoTpReassembler {
 }
 
 #[cfg(feature = "python")]
+impl Default for PyIsoTpReassembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "python")]
 #[pymethods]
 impl PyIsoTpReassembler {
     #[new]
@@ -678,10 +685,9 @@ impl PyIsoTpReassembler {
 
         match self.manager.process_frame(&frame) {
             Ok((completed, fc_frame)) => {
-                let py_completed = match completed {
-                    Some(ref b) => Some(pyo3::types::PyBytes::new(py, b.as_slice()).into()),
-                    None => None,
-                };
+                let py_completed = completed
+                    .as_ref()
+                    .map(|b| pyo3::types::PyBytes::new(py, b.as_slice()).into());
                 Ok(PyFeedResult {
                     completed: py_completed,
                     flow_control_required: fc_frame.is_some(),
@@ -732,6 +738,10 @@ impl PyPdoMapping {
         &self.inner.name
     }
 
+    // One parameter per column of a PDO signal definition: the arity belongs to
+    // the Python signature, and grouping them into a struct would only move the
+    // same seven arguments to the call site.
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (name, bit_start, bit_length, signal_type="uint16", factor=1.0, offset=0.0, unit=""))]
     pub fn add_signal(
         &mut self,
@@ -795,6 +805,13 @@ impl PyPdoMapping {
 #[pyclass(name = "NmtMaster")]
 pub struct PyNmtMaster {
     inner: crate::nmt::NmtMaster,
+}
+
+#[cfg(feature = "python")]
+impl Default for PyNmtMaster {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(feature = "python")]
@@ -1009,9 +1026,7 @@ struct PyCallableBus {
 impl crate::simulator::CanBusWrapper for PyCallableBus {
     fn send(&self, frame: &crate::frame::CanFrame) -> bool {
         Python::attach(|py| {
-            let py_frame = PyCanFrame {
-                inner: frame.clone(),
-            };
+            let py_frame = PyCanFrame { inner: *frame };
             if let Err(e) = self.send_callback.call1(py, (py_frame,)) {
                 eprintln!("VirtualSimulator send callback error: {:?}", e);
                 false
@@ -1028,7 +1043,7 @@ impl crate::simulator::CanBusWrapper for PyCallableBus {
                     if obj.is_none(py) {
                         None
                     } else if let Ok(py_frame) = obj.extract::<PyRef<PyCanFrame>>(py) {
-                        Some(py_frame.inner.clone())
+                        Some(py_frame.inner)
                     } else {
                         None
                     }
@@ -1047,6 +1062,13 @@ impl crate::simulator::CanBusWrapper for PyCallableBus {
 pub struct PyVirtualCanopenSimulator {
     state: std::sync::Arc<std::sync::RwLock<crate::simulator::SimulatorState>>,
     thread_handle: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(feature = "python")]
+impl Default for PyVirtualCanopenSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(feature = "python")]

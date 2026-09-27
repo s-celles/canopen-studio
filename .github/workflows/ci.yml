@@ -75,6 +75,13 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # --workspace above never enables the optional `python` feature, so the
+      # PyO3 bindings are the one module no Rust job compiles. That is how the
+      # pyo3 0.29 bump (#22) merged with a build that could not link, seen only
+      # by the Python jobs several minutes later.
+      - name: Lint the PyO3 bindings (clippy)
+        run: cargo clippy -p canopen-core --features python -- -D warnings
+
       - name: Run tests
         run: cargo test --workspace
 
