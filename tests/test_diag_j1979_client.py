@@ -9,7 +9,8 @@ answering from the same scripted ECU.
 import pytest
 from elm327_fake import FakeElm327
 
-from canopen_studio.diag import DiagnosticInterface, DiagnosticResponse
+from canopen_studio.diag import DiagnosticInterface, DiagnosticResponse, TransportError
+from canopen_studio.diag.elm327.protocol import ElmBufferFull
 from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
 from canopen_studio.diag.j1979.client import J1979Client, VehicleIdentity
 from canopen_studio.diag.j1979.pids import PidTable
@@ -47,6 +48,9 @@ class ScriptedInterface(DiagnosticInterface):
 
     def _request(self, payload, timeout):
         self.requests.append(payload)
+        answer = self.script.get(payload, [])
+        if isinstance(answer, Exception):
+            raise answer
         return [DiagnosticResponse(source=source, data=data) for source, data in self.script.get(payload, [])]
 
 
@@ -292,6 +296,30 @@ class TestIdentify:
     def test_the_supported_pid_fingerprint_is_the_union(self):
         """What profile resolution falls back to when a vehicle withholds its VIN."""
         assert client(self.SCRIPT).identify().fingerprint == frozenset({0x00, 0x04, 0x05, 0x1C})
+
+    def test_the_obd_standard_is_labelled_before_any_profile_supplies_a_table(self):
+        """identify() runs with an empty table: its result is what selects the profile."""
+        script = {**self.SCRIPT, b"\x01\x1c": [(0x7E8, bytes([0x41, 0x1C, 0x0D]))]}
+
+        identity = J1979Client(ScriptedInterface(script)).identify()
+
+        assert identity.obd_standard == "JOBD, EOBD and OBD-II"
+
+    def test_an_adapter_overflowing_on_the_ecu_names_still_identifies_the_vehicle(self):
+        """Several ECUs answering 090A at once can overflow a clone adapter's buffer."""
+        script = {**self.SCRIPT, b"\x09\x0a": ElmBufferFull("BUFFER FULL", "090A")}
+
+        identity = client(script).identify()
+
+        assert identity.vin == VIN
+        assert identity.ecu_names == {}
+        assert identity.calibration_ids == {0x7E8: "CAL-1234"}
+
+    def test_a_link_lost_while_reading_the_ecu_names_is_still_raised(self):
+        script = {**self.SCRIPT, b"\x09\x0a": TransportError("the Bluetooth LE adapter disconnected")}
+
+        with pytest.raises(TransportError):
+            client(script).identify()
 
     def test_a_silent_vehicle_identifies_to_nothing_usable(self):
         identity = client().identify()
