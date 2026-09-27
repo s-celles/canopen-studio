@@ -9,55 +9,78 @@ three.
 This page maps each of them onto the OSI reference model, and names the
 standard that governs every box.
 
-## The three stacks side by side
+## The two stacks side by side
 
-```mermaid
-flowchart TB
-    H1["<b>Classic CAN</b>"]
-    H2["<b>CANopen</b>"]
-    H3["<b>OBD-II</b>"]
-
-    C7["<b>L7 · Application</b><br/>none<br/>an identifier means whatever<br/>its designer decided"]
-    O7["<b>L7 · Application</b><br/>CiA 301<br/>NMT · SDO · PDO · SYNC<br/>EMCY · Heartbeat<br/>profiles: CiA 402…"]
-    D7["<b>L7 · Application</b><br/>SAE J1979 / ISO 15031-5<br/>modes 01–0A<br/>PIDs · DTCs · VIN<br/>UDS ISO 14229 beyond it"]
-
-    C56["<b>L5–6 · Session, Presentation</b><br/>none — CAN has no connection<br/>to manage, no representation<br/>to negotiate"]
-    O56["<b>L5–6</b><br/>none"]
-    D56["<b>L5–6</b><br/>none"]
-
-    C34["<b>L3–4 · Network, Transport</b><br/>none<br/>8 bytes per frame,<br/>no routing, no segmentation"]
-    O34["<b>L3–4</b><br/>SDO transfer, CiA 301<br/>segmented and block modes<br/>carry objects past 8 bytes"]
-    D34["<b>L3–4</b><br/>ISO-TP, ISO 15765-2<br/>SF · FF · CF · FC<br/>up to 4095 bytes"]
-
-    C2["<b>L2 · Data Link</b><br/>ISO 11898-1<br/>frame format · arbitration<br/>bit stuffing · CRC<br/>CAN FD since the 2015 edition"]
-    O2["<b>L2</b><br/>ISO 11898-1<br/><i>unchanged</i>"]
-    D2["<b>L2</b><br/>ISO 11898-1, narrowed by<br/>ISO 15765-4: 11- or 29-bit,<br/>fixed request/response IDs"]
-
-    C1["<b>L1 · Physical</b><br/>ISO 11898-2 high-speed<br/>ISO 11898-3 fault tolerant<br/>two-wire differential, 120 Ω"]
-    O1["<b>L1</b><br/>ISO 11898-2<br/><i>unchanged</i>"]
-    D1["<b>L1</b><br/>ISO 11898-2, narrowed by<br/>ISO 15765-4:<br/>500 or 250 kbit/s"]
-
-    H1 --- C7 --- C56 --- C34 --- C2 --- C1
-    H2 --- O7 --- O56 --- O34 --- O2 --- O1
-    H3 --- D7 --- D56 --- D34 --- D2 --- D1
-
-    classDef head fill:#0b7285,stroke:#0b7285,color:#fff
-    classDef empty fill:#f1f3f5,stroke:#adb5bd,color:#495057,font-style:italic
-    classDef shared fill:#e3fafc,stroke:#0b7285
-    classDef own fill:#fff4e6,stroke:#e8590c
-
-    class H1,H2,H3 head
-    class C7,C56,C34,O56,D56 empty
-    class C2,C1,O2,O1,D2,D1 shared
-    class O7,O34,D7,D34 own
-```
+<svg class="osi-diagram" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 760" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-label="CAN, CANopen and OBD-II mapped onto the seven layers of the OSI model">
+  <title>CAN, CANopen and OBD-II in the OSI model</title>
+  <rect class="bg" x="0" y="0" width="960" height="760"/>
+  <text class="txt" x="105" y="52" font-size="15" font-weight="700" text-anchor="middle">OSI model</text>
+  <text class="h-co" x="385" y="44" font-size="16" font-weight="700" text-anchor="middle">CANopen stack</text>
+  <text class="muted" x="385" y="62" font-size="12" text-anchor="middle">industrial automation, CiA 301</text>
+  <text class="h-obd" x="760" y="44" font-size="16" font-weight="700" text-anchor="middle">OBD-II over CAN stack</text>
+  <text class="muted" x="760" y="62" font-size="12" text-anchor="middle">vehicle diagnostics, ISO 15765-4</text>
+  <g font-size="13" font-weight="600">
+    <rect class="osi" x="20" y="85" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="121" text-anchor="middle">7 &#183; Application</text>
+    <rect class="osi" x="20" y="155" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="191" text-anchor="middle">6 &#183; Presentation</text>
+    <rect class="osi" x="20" y="225" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="261" text-anchor="middle">5 &#183; Session</text>
+    <rect class="osi" x="20" y="295" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="331" text-anchor="middle">4 &#183; Transport</text>
+    <rect class="osi" x="20" y="365" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="401" text-anchor="middle">3 &#183; Network</text>
+    <rect class="osi" x="20" y="435" width="170" height="62" rx="6"/>
+    <text class="txt" x="105" y="471" text-anchor="middle">2 &#183; Data link</text>
+    <rect class="osi" x="20" y="505" width="170" height="135" rx="6"/>
+    <text class="txt" x="105" y="577" text-anchor="middle">1 &#183; Physical</text>
+  </g>
+  <rect class="co" x="210" y="85" width="350" height="62" rx="6"/>
+  <text class="txt" x="385" y="104" font-size="13" font-weight="700" text-anchor="middle">CiA 301: CANopen application layer</text>
+  <text class="txt" x="385" y="121" font-size="12" text-anchor="middle">Object dictionary, NMT, SDO, PDO, SYNC, EMCY</text>
+  <text class="muted" x="385" y="138" font-size="12" text-anchor="middle">Profiles: CiA 401 (I/O), CiA 402 (drives), ...</text>
+  <rect class="empty" x="210" y="155" width="350" height="272" rx="6"/>
+  <text class="muted" x="385" y="272" font-size="13" font-weight="600" text-anchor="middle">Layers 3 to 6 not used</text>
+  <text class="muted" x="385" y="294" font-size="12" text-anchor="middle">The application sits directly on</text>
+  <text class="muted" x="385" y="311" font-size="12" text-anchor="middle">the CAN data link layer</text>
+  <text class="muted" x="385" y="328" font-size="12" text-anchor="middle">(SDO handles its own segmentation)</text>
+  <rect class="obd" x="580" y="85" width="360" height="62" rx="6"/>
+  <text class="txt" x="760" y="104" font-size="13" font-weight="700" text-anchor="middle">SAE J1979 / ISO 15031-5: OBD services</text>
+  <text class="txt" x="760" y="121" font-size="12" text-anchor="middle">Services 01 to 0A, PIDs (RPM, speed, coolant temp...)</text>
+  <text class="muted" x="760" y="138" font-size="12" text-anchor="middle">Trouble codes (DTC): SAE J2012 / ISO 15031-6</text>
+  <rect class="empty" x="580" y="155" width="360" height="132" rx="6"/>
+  <text class="muted" x="760" y="226" font-size="13" font-weight="600" text-anchor="middle">Layers 5 and 6 not used</text>
+  <rect class="obd" x="580" y="295" width="360" height="132" rx="6"/>
+  <text class="txt" x="760" y="330" font-size="13" font-weight="700" text-anchor="middle">ISO 15765-2 (ISO-TP)</text>
+  <text class="txt" x="760" y="352" font-size="12" text-anchor="middle">Segmentation: SF, FF, CF frames + FC flow control</text>
+  <text class="txt" x="760" y="371" font-size="12" text-anchor="middle">Messages up to 4095 bytes</text>
+  <text class="muted" x="760" y="390" font-size="12" text-anchor="middle">Normal (11-bit) or normal fixed (29-bit) addressing</text>
+  <rect class="can" x="210" y="435" width="730" height="62" rx="6"/>
+  <text class="h-can" x="575" y="459" font-size="14" font-weight="700" text-anchor="middle">CAN &#183; ISO 11898-1: classic CAN (2.0A 11-bit / 2.0B 29-bit) and CAN FD</text>
+  <text class="txt" x="575" y="480" font-size="12" text-anchor="middle">Non-destructive bit-wise arbitration (CSMA/CR), CRC, ACK acknowledgement, bit stuffing, error handling</text>
+  <rect class="can" x="210" y="505" width="730" height="135" rx="6"/>
+  <text class="h-can" x="575" y="527" font-size="13" font-weight="700" text-anchor="middle">ISO 11898-2: high-speed CAN, CAN_H / CAN_L differential pair</text>
+  <text class="txt" x="575" y="546" font-size="12" text-anchor="middle">120 &#937; termination at each end of the bus</text>
+  <rect class="sub" x="222" y="558" width="326" height="70" rx="5"/>
+  <text class="h-co" x="385" y="578" font-size="12" font-weight="600" text-anchor="middle">CiA 303-1: connectors SUB-D9, M12, ...</text>
+  <text class="txt" x="385" y="597" font-size="12" text-anchor="middle">SUB-D9: CAN_L pin 2, CAN_H pin 7</text>
+  <text class="txt" x="385" y="616" font-size="12" text-anchor="middle">Bit rate: 10 kbit/s to 1 Mbit/s</text>
+  <rect class="sub" x="592" y="558" width="336" height="70" rx="5"/>
+  <text class="h-obd" x="760" y="578" font-size="12" font-weight="600" text-anchor="middle">SAE J1962: 16-pin OBD connector</text>
+  <text class="txt" x="760" y="597" font-size="12" text-anchor="middle">CAN_H pin 6, CAN_L pin 14</text>
+  <text class="txt" x="760" y="616" font-size="12" text-anchor="middle">Bit rate: 250 or 500 kbit/s (ISO 15765-4)</text>
+  <text class="txt" x="20" y="675" font-size="13" font-weight="700">CAN identifiers</text>
+  <text class="txt" x="20" y="697" font-size="12"><tspan class="h-co" font-weight="600">CANopen:</tspan> 11-bit COB-ID = function code (4 bits) + Node-ID (7 bits)</text>
+  <text class="txt" x="100" y="715" font-size="12">e.g. NMT 0x000, TPDO1 0x180 + ID, SDO 0x600 / 0x580 + ID, Heartbeat 0x700 + ID</text>
+  <text class="txt" x="20" y="737" font-size="12"><tspan class="h-obd" font-weight="600">OBD-II:</tspan> functional request 0x7DF, ECU responses 0x7E8 to 0x7EF (29-bit: request 0x18DB33F1, responses 0x18DAF1xx)</text>
+</svg>
 
 ## Reading the diagram
 
 **The bottom two layers are common ground.** A CANopen drive and a car's engine
 ECU put electrically indistinguishable frames on the wire. Everything the
 studio does below the application layer — capture, timestamping, the trace, the
-bit-level view, the PCAP-NG export — therefore works the same for all three.
+bit-level view, the PCAP-NG export — therefore works the same for both.
 
 **Layers 3 to 6 are mostly empty, and that is the interesting part.** A classic
 CAN frame carries at most eight bytes and there is nowhere to put a longer
@@ -66,9 +89,10 @@ CANopen does it with segmented and block SDO transfers, OBD-II with ISO-TP.
 They solve the same problem in incompatible ways, which is why reading a VIN
 and reading an object dictionary entry share no code above the data link layer.
 
-**Layer 7 is where the three part company.** Classic CAN has nothing there at
-all: an identifier means whatever the designer decided, which is why the studio
-ships [decoders](decoders.md) for specific devices rather than a universal one.
+**Layer 7 is where the two part company**, and plain CAN has nothing there at
+all: outside a higher-layer protocol an identifier means whatever the designer
+decided, which is why the studio ships [decoders](decoders.md) for specific
+devices rather than a universal one.
 
 !!! note "CAN FD does not add a layer"
     CAN FD changes layers 1 and 2 only — a second bit rate for the data phase,
