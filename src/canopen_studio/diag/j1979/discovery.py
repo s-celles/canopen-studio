@@ -97,6 +97,7 @@ def discover_supported_pids(
     mode: int = 0x01,
     timeout: Optional[float] = None,
     max_blocks: int = len(SUPPORT_PIDS),
+    suffix: Tuple[int, ...] = (),
 ) -> SupportedPids:
     """
     Walk a vehicle's support bitmasks and report what it implements.
@@ -107,6 +108,8 @@ def discover_supported_pids(
         timeout: Seconds to allow each request.
         max_blocks: How many bitmask blocks to walk at most, bounding the scan on a
             vehicle whose "there is more" bit is stuck on.
+        suffix: Bytes following the PID in each request and echoed in each reply — the
+            frame number, for mode 02.
 
     Returns:
         The supported PIDs, per ECU. Empty when nothing answered, which is how an
@@ -115,7 +118,7 @@ def discover_supported_pids(
     found: Dict[int, set] = {}
 
     for base in SUPPORT_PIDS[:max_blocks]:
-        replies = interface.positive_responses(mode, base, timeout=timeout)
+        replies = interface.positive_responses(mode, base, *suffix, timeout=timeout)
         if not replies:
             # No ECU implements this bitmask PID, so there is nothing beyond it either.
             break
@@ -123,12 +126,13 @@ def discover_supported_pids(
         continues = False
         for reply in replies:
             payload = reply.payload
+            start = 1 + len(suffix)
             # The payload opens with the PID echo; a reply to a different PID is a late
             # answer to an earlier request and must not be folded in.
-            if len(payload) < 1 + BITMASK_BYTES or payload[0] != base:
+            if len(payload) < start + BITMASK_BYTES or payload[0] != base or payload[1:start] != bytes(suffix):
                 continue
             try:
-                pids = decode_support_bitmask(base, payload[1 : 1 + BITMASK_BYTES])
+                pids = decode_support_bitmask(base, payload[start : start + BITMASK_BYTES])
             except ValueError:
                 continue
 

@@ -31,6 +31,12 @@ ECUS = {
     "03": {0x7E8: bytes([0x43, 0x01, 0x01, 0x43])},
     "07": {0x7E8: bytes([0x47, 0x00])},
     "0A": {0x7E8: bytes([0x4A, 0x00])},
+    # A freeze frame stored for P0143, capturing engine speed.
+    "020200": {0x7E8: bytes([0x42, 0x02, 0x00, 0x01, 0x43])},
+    "020000": {0x7E8: bytes([0x42, 0x00, 0x00, 0x40, 0x10, 0x00, 0x00])},
+    "020C00": {0x7E8: bytes([0x42, 0x0C, 0x00, 0x1A, 0xF8])},
+    # Lamp on, one code; the evaporative monitor has not run.
+    "0101": {0x7E8: bytes([0x41, 0x01, 0x81, 0x07, 0x65, 0x04])},
 }
 
 
@@ -163,6 +169,32 @@ class TestConnecting:
 
         assert session.is_open is False
         assert tools.obd_status()["connected"] is False
+
+
+class TestFreezeFrameAndReadiness:
+    def test_the_freeze_frame_names_its_code_and_values(self, session):
+        result = tools.obd_read_freeze_frame()
+
+        assert result["count"] == 1
+        frame = result["frames"][0]
+        assert frame["dtc"] == "P0143"
+        assert frame["values"][0]["name"] == "engine_speed"
+
+    def test_readiness_reports_what_has_not_run(self, session):
+        result = tools.obd_read_readiness()
+
+        assert result["mil_on"] is True
+        assert result["incomplete"] == ["evaporative_system"]
+        assert result["all_complete"] is False
+
+    def test_a_vehicle_silent_on_this_cycle_says_so(self, session):
+        assert "error" in tools.obd_read_readiness(this_cycle=True)
+
+    def test_both_need_a_session(self):
+        for call in (tools.obd_read_freeze_frame, tools.obd_read_readiness):
+            with pytest.raises(Exception) as excinfo:
+                call()
+            assert "obd_connect" in str(excinfo.value)
 
 
 class TestStatus:

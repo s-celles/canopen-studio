@@ -1354,6 +1354,8 @@ class CanStudioApp(tk.Tk):
         ttk.Button(dtc_buttons, text="📋 Read All Codes", command=self._obd_read_dtcs).pack(side=tk.LEFT, padx=2)
         self.btn_obd_clear = ttk.Button(dtc_buttons, text="🧹 Clear Codes", command=self._obd_clear_dtcs)
         self.btn_obd_clear.pack(side=tk.LEFT, padx=2)
+        ttk.Button(dtc_buttons, text="❄ Freeze Frame", command=self._obd_read_freeze_frame).pack(side=tk.LEFT, padx=2)
+        ttk.Button(dtc_buttons, text="✅ Readiness", command=self._obd_read_readiness).pack(side=tk.LEFT, padx=2)
 
         self.obd_dtc_tree = ttk.Treeview(
             box_dtc, columns=("code", "kind", "system", "description"), show="headings", height=12
@@ -1682,6 +1684,81 @@ class CanStudioApp(tk.Tk):
                 self._obd_set_status("No trouble codes stored.", "#2e8b57")
 
         self._obd_run(work, done)
+
+    def _obd_read_freeze_frame(self):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        self._obd_set_status("Reading the freeze frame…", "#d18f00")
+
+        def done(frames):
+            headline, rows = self.freeze_frame_rows(frames)
+            self._obd_set_status(headline, "#2e8b57" if not frames else "#c05000")
+            if frames:
+                self._obd_show_table("Freeze Frame", headline, ("ECU", "Parameter", "Value", "Unit"), rows)
+
+        self._obd_run(client.read_freeze_frames, done)
+
+    def _obd_read_readiness(self):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        self._obd_set_status("Reading emissions readiness…", "#d18f00")
+
+        def done(readiness):
+            headline, rows = self.readiness_rows(readiness)
+            ready = readiness is not None and readiness.all_complete
+            self._obd_set_status(headline, "#2e8b57" if ready else "#c05000")
+            if readiness is not None:
+                self._obd_show_table("Emissions Readiness", headline, ("Monitor", "Status"), rows)
+
+        self._obd_run(client.read_readiness, done)
+
+    @staticmethod
+    def freeze_frame_rows(frames):
+        """A status headline and table rows for freeze frames. Pure, for testing."""
+        if not frames:
+            return "No freeze frame stored — no ECU holds a fault snapshot.", []
+        codes = ", ".join(f"{frame.dtc or '?'} (0x{frame.source:X})" for frame in frames)
+        rows = []
+        for frame in frames:
+            for value in frame.values:
+                shown = f"{value.value:.2f}" if isinstance(value.value, float) else str(value.value)
+                rows.append((f"0x{frame.source:X}", value.name, shown, value.unit or ""))
+        return f"Freeze frame stored for {codes}.", rows
+
+    @staticmethod
+    def readiness_rows(readiness):
+        """A status headline and table rows for emissions readiness. Pure, for testing."""
+        if readiness is None:
+            return "No ECU reported monitor status — is the ignition on?", []
+        marks = {"complete": "✔ complete", "incomplete": "✘ incomplete", "not_available": "— not available"}
+        rows = [(monitor.label, marks[monitor.status]) for monitor in readiness.monitors]
+        if readiness.all_complete:
+            headline = "All monitors complete, lamp off."
+        else:
+            parts = []
+            if readiness.mil_on:
+                parts.append("lamp ON")
+            if readiness.incomplete:
+                parts.append(
+                    f"{len(readiness.incomplete)} incomplete: " + ", ".join(m.label for m in readiness.incomplete)
+                )
+            headline = "Not ready — " + "; ".join(parts) + "."
+        return headline, rows
+
+    def _obd_show_table(self, title: str, headline: str, columns, rows):
+        """Show a result in a window of its own, leaving the tab's layout alone."""
+        window = tk.Toplevel(self)
+        window.title(f"OBD-II — {title}")
+        ttk.Label(window, text=headline, padding=8, wraplength=560).pack(fill=tk.X)
+        tree = ttk.Treeview(window, columns=columns, show="headings", height=min(max(len(rows), 4), 20))
+        for column in columns:
+            tree.heading(column, text=column)
+            tree.column(column, anchor="w", width=560 // len(columns))
+        for row in rows:
+            tree.insert("", tk.END, values=row)
+        tree.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
 
     def _obd_clear_dtcs(self):
         """
