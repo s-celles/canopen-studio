@@ -8,8 +8,44 @@ Usage:
 import os
 import sys
 import shutil
+import plistlib
 import subprocess
 import argparse
+import importlib.util
+
+# bleak picks its backend at run time from the platform, so PyInstaller's import scan
+# never sees it; each backend also drags in a native binding of its own.
+BLE_COLLECT = {
+    "darwin": ["bleak.backends.corebluetooth", "CoreBluetooth", "libdispatch", "objc"],
+    "win32": ["bleak.backends.winrt", "winrt"],
+    "linux": ["bleak.backends.bluezdbus", "dbus_fast"],
+}
+
+# macOS kills an app that touches Bluetooth without saying why in its Info.plist.
+BLUETOOTH_USAGE = "CAN & CANopen Studio connects to Bluetooth LE OBD-II adapters."
+
+
+def ble_arguments():
+    """PyInstaller arguments bundling the BLE transport, or none if bleak is missing."""
+    if importlib.util.find_spec("bleak") is None:
+        print("WARNING: bleak is not installed; the build will not reach Bluetooth LE adapters.")
+        print("         Install it with: uv sync --extra ble")
+        return []
+    platform = "linux" if sys.platform.startswith("linux") else sys.platform
+    return ["--hidden-import=bleak"] + [f"--collect-submodules={name}" for name in BLE_COLLECT.get(platform, [])]
+
+
+def declare_bluetooth_usage(app_path):
+    """Add the Bluetooth usage string to a macOS bundle and re-sign it."""
+    plist_path = os.path.join(app_path, "Contents", "Info.plist")
+    with open(plist_path, "rb") as handle:
+        info = plistlib.load(handle)
+    info["NSBluetoothAlwaysUsageDescription"] = BLUETOOTH_USAGE
+    with open(plist_path, "wb") as handle:
+        plistlib.dump(info, handle)
+    # Editing Info.plist breaks the signature PyInstaller applied; an unsigned arm64
+    # binary does not launch at all, so sign it again ad hoc.
+    subprocess.run(["codesign", "--force", "--deep", "--sign", "-", app_path], check=True)
 
 
 def main():
@@ -64,6 +100,7 @@ def main():
         "--hidden-import=matplotlib.backends.backend_tkagg",
         "--hidden-import=canopen",
         "--collect-submodules=canopen_studio",
+        *ble_arguments(),
         # Source entry
         "src/canopen_studio/gui.py",
     ]
@@ -79,6 +116,9 @@ def main():
 
     res = subprocess.run(cmd)
     if res.returncode == 0:
+        app_bundle = os.path.join(dist_dir, "CANopen-Studio.app")
+        if sys.platform == "darwin" and os.path.isdir(app_bundle):
+            declare_bluetooth_usage(app_bundle)
         print("-" * 60)
         print("BUILD SUCCESSFUL!")
         if args.onefile:

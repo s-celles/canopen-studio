@@ -136,11 +136,11 @@ generate-icon:
 
 # Build standalone Windows executable folder with PyInstaller
 build-exe:
-    uv run --with pyinstaller python scripts/build_exe.py --clean
+    uv run --extra ble --with pyinstaller python scripts/build_exe.py --clean
 
 # Build single-file portable Windows executable (.exe)
 build-portable:
-    uv run --with pyinstaller python scripts/build_exe.py --clean --onefile
+    uv run --extra ble --with pyinstaller python scripts/build_exe.py --clean --onefile
 
 # Build Rust crates (canopen-core and canopen-cli)
 rust-build:
