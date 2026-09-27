@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "python")]
-#[pyclass(name = "CanFrame")]
+#[pyclass(name = "CanFrame", from_py_object)]
 #[derive(Clone)]
 pub struct PyCanFrame {
     pub inner: CanFrame,
@@ -627,7 +627,7 @@ pub fn decode_sdo<'py>(
 #[pyclass(name = "FeedResult")]
 pub struct PyFeedResult {
     #[pyo3(get)]
-    pub completed: Option<PyObject>,
+    pub completed: Option<Py<PyAny>>,
     #[pyo3(get)]
     pub flow_control_required: bool,
 }
@@ -1001,14 +1001,14 @@ impl PyEdsFile {
 #[cfg(feature = "python")]
 #[cfg(feature = "python")]
 struct PyCallableBus {
-    send_callback: PyObject,
-    recv_callback: PyObject,
+    send_callback: Py<PyAny>,
+    recv_callback: Py<PyAny>,
 }
 
 #[cfg(feature = "python")]
 impl crate::simulator::CanBusWrapper for PyCallableBus {
     fn send(&self, frame: &crate::frame::CanFrame) -> bool {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let py_frame = PyCanFrame {
                 inner: frame.clone(),
             };
@@ -1022,7 +1022,7 @@ impl crate::simulator::CanBusWrapper for PyCallableBus {
     }
 
     fn recv(&self, timeout_ms: u64) -> Option<crate::frame::CanFrame> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             match self.recv_callback.call1(py, (timeout_ms as f64 / 1000.0,)) {
                 Ok(obj) => {
                     if obj.is_none(py) {
@@ -1062,7 +1062,7 @@ impl PyVirtualCanopenSimulator {
         }
     }
 
-    pub fn start(&mut self, send_func: PyObject, recv_func: PyObject) -> PyResult<()> {
+    pub fn start(&mut self, send_func: Py<PyAny>, recv_func: Py<PyAny>) -> PyResult<()> {
         // Guard on the thread, not on the flag. `SimulatorState::new` starts
         // `running` at true — `run_simulator_loop` reads it as "keep going", and
         // the UDP simulator hands it straight to that loop — so testing the flag
@@ -1098,7 +1098,7 @@ impl PyVirtualCanopenSimulator {
         // release the GIL: the simulator thread takes it on every send and recv
         // to call back into Python, so joining while holding it deadlocks.
         if let Some(handle) = self.thread_handle.take() {
-            py.allow_threads(move || {
+            py.detach(move || {
                 let _ = handle.join();
             });
         }
@@ -1151,7 +1151,7 @@ impl PyPcapNgWriter {
     #[pyo3(signature = (path, interface_name="canopen-studio"))]
     pub fn new(py: Python<'_>, path: &str, interface_name: &str) -> PyResult<Self> {
         let file = py
-            .allow_threads(|| crate::pcap::open_capture_sink(path))
+            .detach(|| crate::pcap::open_capture_sink(path))
             .map_err(|e| PyIOError::new_err(format!("cannot open capture {path}: {e}")))?;
 
         let writer = PcapNgWriter::new(file, interface_name)
