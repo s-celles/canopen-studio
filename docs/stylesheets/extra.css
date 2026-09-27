@@ -1,0 +1,95 @@
+/* Palette for the OSI layer diagram in docs/osi_model.md.
+ *
+ * The diagram is inlined into the page rather than referenced as an image so
+ * that it can follow Material's palette toggle. That rules out a <style>
+ * element inside the <svg>: Python-Markdown ends its raw HTML block at the
+ * closing </style> and wraps the rest of the drawing in a <p>, which the HTML
+ * parser treats as a breakout element and which therefore truncates the SVG.
+ */
+
+.osi-diagram {
+  width: 100%;
+  height: auto;
+}
+
+.osi-diagram rect {
+  stroke-width: 1.5;
+}
+
+/* Surfaces and prose take Material's own colours, so the drawing sits flush
+   with the page in either scheme; the three accent hues are shared. */
+.osi-diagram .bg {
+  fill: var(--md-default-bg-color);
+}
+.osi-diagram .txt {
+  fill: var(--md-default-fg-color);
+}
+.osi-diagram .muted {
+  fill: var(--md-default-fg-color--light);
+}
+.osi-diagram .sub {
+  fill: var(--md-default-bg-color);
+  stroke: #1a7f37;
+}
+.osi-diagram .osi {
+  fill: #eaeef2;
+  stroke: #8c959f;
+}
+.osi-diagram .co {
+  fill: #ddf4ff;
+  stroke: #0969da;
+}
+.osi-diagram .obd {
+  fill: #fff1e5;
+  stroke: #bc4c00;
+}
+.osi-diagram .can {
+  fill: #dafbe1;
+  stroke: #1a7f37;
+}
+.osi-diagram .empty {
+  fill: none;
+  stroke: #8c959f;
+  stroke-dasharray: 6 4;
+}
+.osi-diagram .h-co {
+  fill: #0969da;
+}
+.osi-diagram .h-obd {
+  fill: #bc4c00;
+}
+.osi-diagram .h-can {
+  fill: #1a7f37;
+}
+
+[data-md-color-scheme="slate"] .osi-diagram .osi {
+  fill: #21262d;
+  stroke: #6e7681;
+}
+[data-md-color-scheme="slate"] .osi-diagram .co {
+  fill: #0c2d4e;
+  stroke: #4493f8;
+}
+[data-md-color-scheme="slate"] .osi-diagram .obd {
+  fill: #3d1f0a;
+  stroke: #f0883e;
+}
+[data-md-color-scheme="slate"] .osi-diagram .can {
+  fill: #0f2e1a;
+  stroke: #3fb950;
+}
+[data-md-color-scheme="slate"] .osi-diagram .sub {
+  stroke: #3fb950;
+}
+[data-md-color-scheme="slate"] .osi-diagram .empty {
+  stroke: #6e7681;
+}
+[data-md-color-scheme="slate"] .osi-diagram .h-co {
+  fill: #4493f8;
+}
+[data-md-color-scheme="slate"] .osi-diagram .h-obd {
+  fill: #f0883e;
+}
+[data-md-color-scheme="slate"] .osi-diagram .h-can {
+  fill: #3fb950;
+}

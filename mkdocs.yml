@@ -69,12 +69,21 @@ plugins:
           - roadmap.md
           - changelog.md
 
+extra_css:
+  - stylesheets/extra.css
+
 markdown_extensions:
   - admonition
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        # Without this, a ```mermaid block renders as a code listing rather
+        # than a diagram — which is what ROADMAP.md's diagrams were doing.
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -91,6 +100,7 @@ nav:
   - Installation: installation.md
   - Quick Start: quickstart.md
   - Hardware & Interfaces: hardware.md
+  - Protocol Layers (OSI Model): osi_model.md
   - Protocol Stack & Decoders: decoders.md
   - Logic Analyzer & Signals: logic_analyzer.md
   - Architecture: architecture.md

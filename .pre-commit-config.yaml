@@ -5,6 +5,15 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^mkdocs\.yml$
+      # mkdocs.yml carries a !!python/name: tag for Material's Mermaid fence, which
+      # the safe loader refuses to construct. --unsafe checks the syntax without
+      # resolving tags; scoping it to that one file keeps every other YAML strict.
+      - id: check-yaml
+        name: check yaml (mkdocs, unresolved tags)
+        alias: check-yaml-mkdocs
+        args: [--unsafe]
+        files: ^mkdocs\.yml$
       - id: check-added-large-files
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
