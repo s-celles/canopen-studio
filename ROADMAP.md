@@ -284,9 +284,14 @@ missing piece — a polling engine.
 | **Settings** | ⏳ planned | Persistent preferences: units, last adapter, polling set. |
 | **ECU control (actuator tests)** | 🚫 not planned | Mode 08 and UDS `InputOutputControlByIdentifier` (0x2F) drive actuators on a vehicle people drive. They stay refused in `security.py`; if ever enabled, only behind the UDS work and the existing gates, and never through a clone adapter. |
 
-**Order.** The polling engine first, since four features depend on it; then the
-dashboard. Freeze frame and emissions readiness are independent and small, and are
-what a diagnosis most often needs, so they can go in parallel.
+**Milestones, in order.** Sequenced by dependency, not dated:
+
+1. Freeze frame and emissions readiness — independent of the rest, small, and what a
+   diagnosis most often needs.
+2. Polling engine and data logging — the foundation of the next three.
+3. Live dashboard.
+4. Trip statistics and acceleration timing.
+5. Vehicle garage and settings.
 
 **The constraint is the adapter, not the code.** An ELM327 answers one request at a
 time, and a clone over BLE shares a few requests per second across every PID on
@@ -314,13 +319,11 @@ rather than 2026 Q4 and 2027 Q2. What follows is re-dated against that.
 
 2026 Q4 (next):
   ├── CAN FD: transports, PCAP-NG FD linktype, FD bitstream, CANopen FD (CiA 1301)
-  ├── OBD-II: polling engine & data logging, freeze frame, emissions readiness
   ├── BLE transport in the Rust core (GATT Nordic UART) — prerequisite for mobile
   └── MCP streaming subscriptions: push anomaly alerts instead of polling
       (heartbeat timeout, unexpected NMT state change, emergency telegrams)
 
 2027 Q1:
-  ├── OBD-II: live dashboard, trip statistics, acceleration timing, vehicle garage
   ├── UDS (ISO 14229) over ISO-TP, behind the existing write gates
   ├── Android Alpha: USB OTG (CANable) + BLE + Wi-Fi UDP, Slint on 'cargo apk'
   └── AG-UI and A2UI streaming
