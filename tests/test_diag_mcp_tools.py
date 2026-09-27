@@ -525,3 +525,77 @@ class TestReloadingProfiles:
         assert "previous" in result["note"]
         assert library.default_library() is before
         assert tools._client.table is table
+
+
+class TestConnectingThroughTheLink:
+    """obd_connect() with no transport runs on the link connect() opened."""
+
+    class Host:
+        def __init__(self, link):
+            self.link = link
+            self.sources = []
+
+        def add_frame_source(self, source):
+            self.sources.append(source)
+
+        def remove_frame_source(self, source):
+            self.sources.remove(source)
+
+    def test_without_a_link_it_says_to_connect_first(self, monkeypatch):
+        monkeypatch.setattr(tools, "_host", self.Host(None))
+
+        result = tools.obd_connect()
+
+        assert result["connected"] is False
+        assert "connect()" in result["error"]
+
+    def test_on_an_elm327_link_the_session_is_the_adapter_itself(self, monkeypatch):
+        from canopen_studio import link as link_module
+
+        monkeypatch.setattr(link_module, "build_elm_transport", lambda interface, channel: FakeElm327(ecus=ECUS))
+        link = link_module.Link("elm327_ble", "")
+        link.open()
+        monkeypatch.setattr(tools, "_host", self.Host(link))
+
+        result = tools.obd_connect()
+
+        assert result["connected"] is True
+        assert tools._session is link.elm
+
+    def test_closing_diagnostics_leaves_an_elm327_link_open(self, monkeypatch):
+        from canopen_studio import link as link_module
+
+        monkeypatch.setattr(link_module, "build_elm_transport", lambda interface, channel: FakeElm327(ecus=ECUS))
+        link = link_module.Link("elm327_ble", "")
+        link.open()
+        monkeypatch.setattr(tools, "_host", self.Host(link))
+        tools.obd_connect()
+
+        assert "link stays open" in tools.obd_disconnect()
+        assert link.is_open
+
+    def test_on_a_can_link_a_native_session_is_fed_by_the_capture_loop(self, monkeypatch):
+        from canopen_studio import link as link_module
+        from canopen_studio.diag.j1979.client import VehicleIdentity
+        from canopen_studio.diag.native import NativeCanDiagnosticInterface
+
+        class Bus:
+            def send(self, msg):
+                pass
+
+            def shutdown(self):
+                pass
+
+        link = link_module.Link("slcan", "COM4", opener=lambda *a, **kw: Bus())
+        link.open()
+        host = self.Host(link)
+        monkeypatch.setattr(tools, "_host", host)
+        monkeypatch.setattr(tools.J1979Client, "identify", lambda self, timeout=None: VehicleIdentity())
+
+        assert tools.obd_connect()["connected"] is True
+        assert isinstance(tools._session, NativeCanDiagnosticInterface)
+        assert len(host.sources) == 1
+
+        tools.obd_disconnect()
+
+        assert host.sources == []

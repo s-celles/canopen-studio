@@ -19,6 +19,7 @@ Copyright (C) 2026 Sébastien Celles
 
 from __future__ import annotations
 
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional
@@ -188,6 +189,10 @@ class DiagnosticInterface(ABC):
 
     def __init__(self) -> None:
         self._open_flag = False
+        # One exchange at a time. A session is shared — the studio, a live poller and an
+        # agent over MCP can all hold it — and an adapter answering one request while
+        # another is written would hand each caller part of the other's reply.
+        self._exchange = threading.RLock()
         self.default_timeout = DEFAULT_TIMEOUT
         self._j1979: Any = None
 
@@ -259,7 +264,8 @@ class DiagnosticInterface(ABC):
             raise NotConnectedError("the diagnostic interface is not open — call open() first")
         if not payload:
             raise ValueError("a diagnostic request carries at least a mode byte")
-        return self._request(bytes(payload), self.default_timeout if timeout is None else timeout)
+        with self._exchange:
+            return self._request(bytes(payload), self.default_timeout if timeout is None else timeout)
 
     def service(self, mode: int, *args: int, timeout: Optional[float] = None) -> List[DiagnosticResponse]:
         """

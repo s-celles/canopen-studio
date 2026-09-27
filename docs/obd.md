@@ -37,14 +37,17 @@ Both expose the same high-level operations, so everything above them is written 
 
 === "GUI"
 
-    Open the **🩺 OBD-II Diagnostics** tab, choose an adapter, and press **Connect**. The
-    studio reads the VIN, discovers which parameters the vehicle implements, and resolves
-    a vehicle profile — all in one step.
+    Choose the adapter in the top bar — an ELM327 (USB/SPP, Wi-Fi or Bluetooth LE) or a
+    CAN adapter — and press **Connect**. On an ELM327 the studio then reads the VIN,
+    discovers which parameters the vehicle implements, and resolves a vehicle profile at
+    once; on a CAN adapter, press **🔍 Identify vehicle** in the **🩺 OBD-II Diagnostics**
+    tab when you want it to start talking to the vehicle.
 
 === "MCP (an AI agent)"
 
     ```python
-    obd_connect(transport="elm327", port="/dev/ttyUSB0")
+    connect(interface="elm327_serial", channel="/dev/ttyUSB0")  # or elm327_ble, elm327_tcp
+    obd_connect()  # runs on that link
     obd_list_supported_pids()
     obd_read_pid("engine_speed")
     obd_read_dtcs(kind="all")
@@ -71,6 +74,40 @@ Both expose the same high-level operations, so everything above them is written 
 ---
 
 ## Connecting an adapter
+
+### One link
+
+The studio talks through **one link**, chosen in the top bar: a CAN adapter or an
+ELM327. What each can carry differs, and the studio says so rather than leaving a tab
+silently empty:
+
+| Link | Frame trace | CANopen | OBD-II |
+|---|---|---|---|
+| CAN adapter (SLCAN, PCAN, Kvaser, gs_usb, SocketCAN, UDP, virtual) | ✅ | ✅ | ✅ ISO-TP over the bus |
+| ELM327 (USB / SPP, Wi-Fi, Bluetooth LE) | — | — | ✅ |
+
+An ELM327 runs its own protocol detection and ISO-TP and answers in ASCII: it passes no
+raw frames on, so the trace and CANopen need a CAN adapter. There is no second Connect
+button for diagnostics; the **🩺 OBD-II Diagnostics** tab shows which link it runs on.
+
+Under the top bar, a **connection chain** shows two segments separately —
+*studio ⟷ adapter* and *adapter ⟷ vehicle* (or *CAN bus*) — because they fail
+separately. An ELM327 can be reachable over Bluetooth while the vehicle does not answer
+(ignition off), and a single "Connected" would hide exactly that. Grey is not yet
+connected or not queried, orange in progress, green working, red failed; on a CAN link
+the far segment shows whether frames are arriving.
+
+In Python, the same model is `canopen_studio.link.Link`:
+
+```python
+from canopen_studio.link import Link
+
+link = Link("elm327_ble", "")  # or Link("slcan", "/dev/ttyUSB0", 500000)
+link.open()
+session, _ = link.diagnostic_session()
+print(session.j1979().identify().vin)
+link.close()
+```
 
 ### USB
 
@@ -137,9 +174,9 @@ chip answers itself, so nothing reaches the vehicle and the ignition can stay of
 `--vehicle` it adds read-only requests: identification and a count of trouble codes.
 
 A BLE peripheral serves one central at a time: close any phone app still connected to
-the adapter first. In the studio, choose **ELM327 — Bluetooth LE**; leave the port field
-blank to take the first adapter found. Over MCP, use `transport="elm327_ble"` with
-`ble_device`.
+the adapter first. In the studio, choose **ELM327 — Bluetooth LE** in the top bar; leave
+the channel on *(first adapter found)* or type an address or a name fragment. Over MCP,
+`connect(interface="elm327_ble", channel="")`, then `obd_connect()`.
 
 ### Native CAN
 
@@ -567,7 +604,7 @@ guards.
 
 | Tool | Purpose |
 |---|---|
-| `obd_connect(transport, port, …, profile)` | Open a session, identify the vehicle, resolve a profile |
+| `obd_connect(profile)` | Open a session on the current link, identify the vehicle, resolve a profile. `transport=…` still opens an adapter of its own, for compatibility |
 | `obd_disconnect()` | Close the session |
 | `obd_status()` | Link, active profile and write posture |
 | `obd_list_supported_pids(mode)` | What the vehicle declares, per ECU |

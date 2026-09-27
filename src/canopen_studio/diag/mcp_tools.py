@@ -50,6 +50,14 @@ _frame_source: Optional[QueueFrameSource] = None
 # profiles can resolve again without asking the vehicle a second time.
 _identity: Optional[VehicleIdentity] = None
 _manual_profile: Optional[str] = None
+# Whether obd_disconnect may close the session. Not when it is an ELM327 link's own
+# session: the link owns it, and only disconnecting the link closes it.
+_session_owned = True
+# The frame queue a native session on the current link reads from, registered with
+# whatever runs the capture loop so it can be withdrawn again.
+_registered_source: Optional[QueueFrameSource] = None
+# Provides the current link when no GUI is attached: the standalone MCP server.
+_host: Any = None
 
 # Set by canopen_studio.gui when the tools run inside the application, so a native
 # session can borrow the bus the capture loop already owns.
@@ -88,8 +96,29 @@ def _gate(agent: bool = False) -> WriteGate:
     return WriteGate(profile, agent=agent)
 
 
+def set_host(host: Any) -> None:
+    """Register what provides the current link when there is no GUI: the MCP server."""
+    global _host
+    _host = host
+
+
+def _link_host() -> Any:
+    return _app_ref if _app_ref is not None else _host
+
+
+def _current_link() -> Any:
+    host = _link_host()
+    return getattr(host, "link", None) if host is not None else None
+
+
 def _reset_state() -> None:
     global _session, _client, _match, _frame_source, _identity, _manual_profile
+    global _session_owned, _registered_source
+    source, _registered_source = _registered_source, None
+    host = _link_host()
+    if source is not None and host is not None and hasattr(host, "remove_frame_source"):
+        host.remove_frame_source(source)
+    _session_owned = True
     _session = None
     _client = None
     _match = None
@@ -104,7 +133,7 @@ def _reset_state() -> None:
 
 
 def obd_connect(
-    transport: str = "elm327",
+    transport: Optional[str] = None,
     port: str = "/dev/ttyUSB0",
     baudrate: int = DEFAULT_BAUDRATE,
     host: str = "192.168.0.10",
@@ -118,11 +147,16 @@ def obd_connect(
 ) -> Dict[str, Any]:
     """Open an OBD-II diagnostic session and identify the vehicle.
 
+    By default the session runs on the link already opened with connect(): an ELM327
+    link (connect(interface="elm327_ble"), "elm327_serial", "elm327_tcp") or a CAN
+    adapter, over which OBD-II travels as ISO-TP. One link serves everything; there is
+    no second connection to manage.
+
     Args:
-        transport: How to reach the vehicle — "elm327" for a serial or Bluetooth SPP
-            adapter, "elm327_tcp" for a Wi-Fi adapter or emulator, "elm327_ble" for a
-            Bluetooth Low Energy adapter (needs the `ble` extra), "native" to speak
-            ISO-TP over one of the studio's own CAN adapters.
+        transport: Leave unset to use the current link. For compatibility it can still
+            open a diagnostic adapter of its own — "elm327" for a serial or Bluetooth SPP
+            adapter, "elm327_tcp" for Wi-Fi, "elm327_ble" for Bluetooth LE (needs the
+            `ble` extra), "native" for ISO-TP over a CAN adapter opened for the purpose.
         port: Serial device for transport="elm327", e.g. /dev/ttyUSB0, /dev/rfcomm0, COM4.
         baudrate: Serial line rate. 38400 suits most adapters; try 9600 for an old board.
         host: Address for transport="elm327_tcp".
@@ -139,20 +173,38 @@ def obd_connect(
             the VIN and the supported-PID fingerprint decide.
     """
     global _session, _client, _match, _frame_source, _identity, _manual_profile
+    global _session_owned, _registered_source
 
     if _session is not None:
         return {"connected": True, "message": "Already connected — call obd_disconnect() first."}
 
+    link = _current_link()
+    use_link = transport is None or (str(transport).strip().lower() in ("native", "can", "isotp") and link is not None)
     try:
-        session, source = _build_session(
-            transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device
-        )
-        session.open()
+        if use_link:
+            if link is None or not link.is_open:
+                return {
+                    "connected": False,
+                    "error": "no link is open — call connect() first, e.g. connect(interface='elm327_ble', "
+                    "channel='') for a Bluetooth LE adapter, or pass transport= to open one here",
+                }
+            session, source = link.diagnostic_session()
+            owned = session is not link.elm
+            if source is not None:
+                _link_host().add_frame_source(source)
+                _registered_source = source
+        else:
+            session, source = _build_session(
+                transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device
+            )
+            session.open()
+            owned = True
     except Exception as exc:
         _reset_state()
         return {"connected": False, "error": str(exc)}
 
     _session = session
+    _session_owned = owned
     _frame_source = source
 
     try:
@@ -162,7 +214,8 @@ def obd_connect(
         client.table = match.profile.table
         client.dtc_descriptions = dict(match.profile.dtc_descriptions)
     except Exception as exc:
-        session.close()
+        if owned:
+            session.close()
         _reset_state()
         return {"connected": False, "error": str(exc)}
 
@@ -194,11 +247,7 @@ def _build_session(transport, port, baudrate, host, tcp_port, protocol, interfac
         return ElmDiagnosticInterface(BleElmTransport(ble_device), protocol=protocol), None
 
     if kind in ("native", "can", "isotp"):
-        if _app_ref is not None and getattr(_app_ref, "bus", None) is not None:
-            # Borrow the bus the application already owns, and take frames from its
-            # capture loop rather than opening a second reader on the same adapter.
-            source = QueueFrameSource()
-            return NativeCanDiagnosticInterface(_app_ref.bus, source=source), source
+        # With a CAN link open, obd_connect uses it instead; this opens a bus of its own.
         return NativeCanDiagnosticInterface.open_bus(interface, channel, bitrate), None
 
     raise DiagnosticError(f"unknown transport {transport!r}; expected elm327, elm327_tcp, elm327_ble or native")
@@ -209,11 +258,13 @@ def obd_disconnect() -> str:
     global _session
     if _session is None:
         return "No diagnostic session."
+    owned = _session_owned
     try:
-        _session.close()
+        if owned:
+            _session.close()
     finally:
         _reset_state()
-    return "Diagnostic session closed."
+    return "Diagnostic session closed." if owned else "Diagnostic session closed; the link stays open."
 
 
 def obd_status() -> Dict[str, Any]:

@@ -143,3 +143,56 @@ class TestBridgeTools:
         monkeypatch.setattr(mcp_server, "_app_ref", None)
 
         assert "gui" in _call(mcp_server.bridge_start).lower()
+
+
+class TestStandaloneLink:
+    """Without a GUI, connect() opens the one link: a CAN adapter or an ELM327."""
+
+    @pytest.fixture
+    def elm_link(self, monkeypatch):
+        from elm327_fake import FakeElm327
+
+        from canopen_studio import link as link_module
+
+        adapter = FakeElm327()
+        monkeypatch.setattr(link_module, "build_elm_transport", lambda interface, channel: adapter)
+        monkeypatch.setattr(mcp_server, "_app_ref", None)
+        monkeypatch.setattr(mcp_server, "_standalone_link", None)
+        monkeypatch.setattr(mcp_server, "_standalone_bus", None)
+        yield adapter
+        if mcp_server._standalone_link is not None:
+            _call(mcp_server.disconnect)
+
+    def test_an_elm327_link_opens_without_a_bus(self, elm_link):
+        assert "Connected" in _call(mcp_server.connect, interface="elm327_ble", channel="")
+
+        status = _call(mcp_server.get_status)
+        assert status["link"]["kind"] == "elm327"
+        assert status["link"]["carries"] == ["obd"]
+        assert mcp_server._standalone_bus is None
+
+    def test_can_tools_explain_that_an_elm327_carries_no_frames(self, elm_link):
+        _call(mcp_server.connect, interface="elm327_ble", channel="")
+
+        reply = _call(mcp_server.send_frame, can_id=0x123, data=[1])
+
+        assert "ELM327" in reply
+        assert "CAN adapter" in reply
+
+    def test_disconnecting_closes_the_adapter(self, elm_link):
+        _call(mcp_server.connect, interface="elm327_ble", channel="")
+
+        assert _call(mcp_server.disconnect) == "Disconnected."
+        assert not elm_link.is_open
+        assert mcp_server._standalone_link is None
+
+    def test_a_link_that_fails_to_open_is_reported(self, elm_link, monkeypatch):
+        from canopen_studio import link as link_module
+
+        def refuse(interface, channel):
+            raise link_module.LinkError("no BLE device found")
+
+        monkeypatch.setattr(link_module, "build_elm_transport", refuse)
+
+        assert "no BLE device found" in _call(mcp_server.connect, interface="elm327_ble", channel="")
+        assert mcp_server._standalone_link is None
