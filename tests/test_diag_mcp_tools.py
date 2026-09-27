@@ -452,3 +452,27 @@ class TestStartupNotice:
 
     def test_the_server_surfaces_the_same_notice(self, writes_allowed):
         assert mcp_server.diagnostic_write_notice() == tools.startup_notice()
+
+
+class TestSampling:
+    def test_sampling_summarises_each_parameter_and_the_rate(self, session):
+        result = tools.obd_sample_pids(["0C", "coolant_temperature"], duration_s=0.3)
+
+        assert result["rate"]["cycles"] >= 1
+        speed = result["parameters"]["engine_speed@0x7E8"]
+        assert speed["min"] == pytest.approx(1726.0)
+        assert "coolant_temperature@0x7E8" in result["parameters"]
+
+    def test_the_window_is_bounded(self, session, monkeypatch):
+        monkeypatch.setattr(tools, "MAX_SAMPLE_SECONDS", 0.2)
+
+        assert tools.obd_sample_pids(["0C"], duration_s=3600)["duration_s"] == 0.2
+
+    def test_only_live_data_can_be_sampled(self, session):
+        assert "mode 09" in tools.obd_sample_pids(["09:02"])["error"]
+
+    def test_an_unreadable_pid_is_reported(self, session):
+        assert "error" in tools.obd_sample_pids(["not-a-pid"])
+
+    def test_nothing_to_sample_is_reported(self, session):
+        assert "error" in tools.obd_sample_pids([])

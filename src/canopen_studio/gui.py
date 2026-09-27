@@ -54,6 +54,7 @@ from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
 from canopen_studio.diag.elm327.ble import BleElmTransport
 from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from canopen_studio.diag.j1979.client import J1979Client
+from canopen_studio.diag.j1979.polling import CsvRecorder, PidPoller
 from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource
 from canopen_studio.diag.profiles.library import ProfileLibrary
 from canopen_studio.diag.profiles.resolver import ProfileResolver
@@ -232,6 +233,8 @@ class CanStudioApp(tk.Tk):
         self.diag_match = None
         self.diag_frame_source: Optional[QueueFrameSource] = None
         self.diag_busy = False
+        # Continuous polling, when running. It owns the session until it stops.
+        self.diag_poller: Optional[PidPoller] = None
         self.rx_thread: Optional[threading.Thread] = None
 
         # Connection actually in use — may differ from the combobox selection when
@@ -1334,6 +1337,10 @@ class CanStudioApp(tk.Tk):
         ttk.Button(pid_buttons, text="🔍 Discover", command=self._obd_discover_pids).pack(side=tk.LEFT, padx=2)
         ttk.Button(pid_buttons, text="📊 Read All", command=self._obd_read_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(pid_buttons, text="↻ Read Selected", command=self._obd_read_selected).pack(side=tk.LEFT, padx=2)
+        self.btn_obd_live = ttk.Button(pid_buttons, text="▶ Live", command=self._obd_toggle_live)
+        self.btn_obd_live.pack(side=tk.LEFT, padx=2)
+        self.btn_obd_record = ttk.Button(pid_buttons, text="⏺ Record…", command=self._obd_toggle_record)
+        self.btn_obd_record.pack(side=tk.LEFT, padx=2)
 
         self.obd_pid_tree = ttk.Treeview(box_pids, columns=("pid", "name", "value", "unit"), show="headings", height=12)
         for column, heading, width in (
@@ -1520,6 +1527,13 @@ class CanStudioApp(tk.Tk):
 
     def _obd_close_session(self):
         """Close the diagnostic session, if any. Safe to call when there is none."""
+        poller, self.diag_poller = self.diag_poller, None
+        if poller is not None:
+            # The poller holds the session; it must let go before the link closes.
+            poller.stop(timeout=5.0)
+            self.diag_busy = False
+            self.btn_obd_live.configure(text="▶ Live")
+            self.btn_obd_record.configure(text="⏺ Record…")
         session = self.diag_session
         self.diag_session = None
         self.diag_frame_source = None
@@ -1649,21 +1663,129 @@ class CanStudioApp(tk.Tk):
 
         def done(results):
             for key, reading in results:
-                if not self.obd_pid_tree.exists(key):
-                    continue
-                current = list(self.obd_pid_tree.item(key, "values"))
-                if reading is None:
-                    current[2] = "no answer"
-                elif isinstance(reading.value, float):
-                    current[2] = f"{reading.value:g}"
-                elif isinstance(reading.value, (bytes, bytearray)):
-                    current[2] = reading.value.hex(" ").upper()
-                else:
-                    current[2] = str(reading.value)
-                self.obd_pid_tree.item(key, values=current)
+                self._obd_show_value(key, "no answer" if reading is None else self.format_reading(reading.value))
             self._obd_set_status(f"Read {len(results)} parameter(s).", "#2e8b57")
 
         self._obd_run(work, done)
+
+    @staticmethod
+    def format_reading(value) -> str:
+        """How a decoded value appears in the parameter table. Pure, for testing."""
+        if isinstance(value, float):
+            return f"{value:g}"
+        if isinstance(value, (bytes, bytearray)):
+            return value.hex(" ").upper()
+        return str(value)
+
+    def _obd_show_value(self, key: str, text: str):
+        if not self.obd_pid_tree.exists(key):
+            return
+        current = list(self.obd_pid_tree.item(key, "values"))
+        current[2] = text
+        self.obd_pid_tree.item(key, values=current)
+
+    # -- Live polling and recording ------------------------------------------
+    #
+    # The poller runs on its own thread and owns the session while it does, so every
+    # other request is held off through diag_busy until it has stopped.
+
+    def _obd_toggle_live(self):
+        if self.diag_poller is not None:
+            self._obd_stop_polling()
+        else:
+            self._obd_start_polling()
+
+    def _obd_toggle_record(self):
+        if self.diag_poller is not None:
+            self._obd_stop_polling()
+            return
+        path = filedialog.asksaveasfilename(
+            title="Record OBD-II parameters", defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+        )
+        if path:
+            self._obd_start_polling(record_to=path)
+
+    def _obd_start_polling(self, record_to: Optional[str] = None):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        if self.diag_busy:
+            messagebox.showinfo("OBD-II", "A diagnostic request is already running.")
+            return
+        keys = list(self.obd_pid_tree.selection()) or list(self.obd_pid_tree.get_children())
+        if not keys:
+            messagebox.showinfo("OBD-II", "Discover the supported parameters first, then select the ones to watch.")
+            return
+
+        pids = [int(key.split(":")[1], 16) for key in keys]
+        try:
+            recorder = CsvRecorder(record_to) if record_to else None
+        except OSError as exc:
+            messagebox.showerror("OBD-II", f"Cannot record to {record_to}: {exc}")
+            return
+
+        def on_cycle(samples, stats):
+            rows = recorder.rows if recorder is not None else None
+            self.after(0, lambda s=samples, t=self.live_status_text(stats, rows): self._obd_on_cycle(s, t))
+
+        self.diag_busy = True
+        self.diag_poller = PidPoller(client, pids, on_cycle=on_cycle, recorder=recorder)
+        self.diag_poller.start()
+        self.btn_obd_live.configure(text="⏹ Stop")
+        self.btn_obd_record.configure(text="⏹ Stop")
+        what = f"recording to {record_to}" if record_to else "live"
+        self._obd_set_status(f"Polling {len(pids)} parameter(s), {what}…", "#d18f00")
+        self.after(500, self._obd_watch_poller)
+
+    def _obd_on_cycle(self, samples, status_text: str):
+        shown = set()
+        for sample in samples:
+            key = f"01:{sample.pid:02X}"
+            # Several ECUs can answer one PID; the table shows the first, the recording keeps all.
+            if key not in shown:
+                shown.add(key)
+                self._obd_show_value(key, self.format_reading(sample.reading.value))
+        self._obd_set_status(status_text, "#2e8b57")
+
+    def _obd_stop_polling(self):
+        poller = self.diag_poller
+        if poller is None:
+            return
+        self._obd_set_status("Stopping after the request in flight…", "#d18f00")
+        # stop() waits for the adapter's current answer, which must not freeze the UI.
+        threading.Thread(target=poller.stop, daemon=True).start()
+
+    def _obd_watch_poller(self):
+        """Notice the poller ending — asked to, or because the link was lost."""
+        poller = self.diag_poller
+        if poller is None:
+            return
+        if poller.running:
+            self.after(500, self._obd_watch_poller)
+            return
+        if poller.recorder is not None:
+            poller.recorder.close()
+        self.diag_poller = None
+        self.diag_busy = False
+        self.btn_obd_live.configure(text="▶ Live")
+        self.btn_obd_record.configure(text="⏺ Record…")
+        if poller.error is not None:
+            self._obd_set_status(f"Polling stopped: {poller.error}", "red")
+        else:
+            rows = f", {poller.recorder.rows} row(s) recorded" if poller.recorder is not None else ""
+            self._obd_set_status(f"Polling stopped after {poller.stats.cycles} cycle(s){rows}.", "#2e8b57")
+
+    @staticmethod
+    def live_status_text(stats, recorded_rows: Optional[int] = None) -> str:
+        """The status line while polling. Pure, for testing."""
+        text = f"Live — {stats.requests_per_second:.1f} requests/s"
+        if stats.recent_cycle_seconds is not None:
+            text += f", each value refreshed every {stats.recent_cycle_seconds:.1f} s"
+        if stats.errors:
+            text += f", {stats.errors} failed"
+        if recorded_rows is not None:
+            text += f" — {recorded_rows} row(s) recorded"
+        return text
 
     def _obd_read_dtcs(self):
         client = self._obd_require_session()

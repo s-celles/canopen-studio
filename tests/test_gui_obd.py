@@ -35,6 +35,7 @@ def make_app(**overrides):
         "diag_match": None,
         "diag_frame_source": None,
         "diag_busy": False,
+        "diag_poller": None,
     }
     state.update(overrides)
     return types.SimpleNamespace(**state)
@@ -278,3 +279,32 @@ class TestFreezeFrameRows:
 
         assert "P0143" in headline
         assert rows == [("0x7E8", "engine_speed", "1726.00", "rpm")]
+
+
+class TestLiveStatus:
+    def stats(self, **fields):
+        from canopen_studio.diag.j1979.polling import PollStats
+
+        return PollStats(**fields)
+
+    def test_the_rate_and_the_refresh_interval_are_shown(self):
+        text = CanStudioApp.live_status_text(self.stats(requests=10, elapsed=4.0, recent_cycle_seconds=2.0))
+
+        assert text == "Live — 2.5 requests/s, each value refreshed every 2.0 s"
+
+    def test_failures_and_the_recording_are_mentioned(self):
+        text = CanStudioApp.live_status_text(self.stats(requests=4, elapsed=2.0, errors=1), recorded_rows=12)
+
+        assert "1 failed" in text
+        assert "12 row(s) recorded" in text
+
+
+class TestValueFormatting:
+    def test_a_number_is_shown_compactly(self):
+        assert CanStudioApp.format_reading(1726.0) == "1726"
+
+    def test_raw_bytes_are_shown_as_spaced_hex(self):
+        assert CanStudioApp.format_reading(b"\x1a\xf8") == "1A F8"
+
+    def test_anything_else_is_shown_as_text(self):
+        assert CanStudioApp.format_reading("EOBD") == "EOBD"

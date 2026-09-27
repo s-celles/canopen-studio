@@ -215,6 +215,40 @@ discarded rather than decoded under this PID's definition — on a shared bus a 
 to an earlier request is still in flight. And a reply too short for its formula falls back
 to raw bytes, because knowing the ECU answered is worth more than a clean failure.
 
+### Watching and recording
+
+OBD-II has no subscription: a value is only ever the answer to a request, so watching one
+change means asking again and again. `PidPoller` does that on a thread of its own, and
+`CsvRecorder` writes every answer down:
+
+```python
+from canopen_studio.diag.j1979 import CsvRecorder, PidPoller
+
+with CsvRecorder("drive.csv") as recorder:
+    poller = PidPoller(obd, [0x0C, 0x0D, 0x05], recorder=recorder)
+    poller.run(duration=60)
+
+print(poller.stats.as_dict())  # requests/s and how often each value was refreshed
+```
+
+An ELM327 answers one request at a time, and every polled PID shares that budget: the
+refresh interval of each value is the time a whole cycle takes, and it grows with the
+number of PIDs. A v1.5 clone over Bluetooth LE was measured at six to eleven requests
+per second, depending on the vehicle's state and how many ECUs answer each request —
+three PIDs refreshed every 0.3 to 0.5 s — and USB and native CAN adapters do better. The poller **measures** the rate it achieves rather than
+promising one, and every row carries its own timestamp, so anything computed from a
+recording can state the sampling it rests on.
+
+The file has one row per reading — `timestamp` (UTC, milliseconds), `elapsed_s`, `ecu`,
+`pid`, `name`, `value`, `unit` — which keeps two ECUs answering the same PID apart and
+never invents a value for a PID that was not sampled at that instant. A PID that fails is
+counted and skipped; a lost link ends the run and is kept in `poller.error`.
+
+In the studio, select parameters in the table (none selected means all of them), then
+**▶ Live** to watch them refresh, or **⏺ Record…** to also write them to a CSV file. The
+status line shows the measured rate. While polling runs it owns the session, so other
+requests wait until it is stopped.
+
 ---
 
 ## Trouble codes
@@ -538,6 +572,7 @@ guards.
 | `obd_status()` | Link, active profile and write posture |
 | `obd_list_supported_pids(mode)` | What the vehicle declares, per ECU |
 | `obd_read_pid(pid, mode)` | Read by identifier, key or name |
+| `obd_sample_pids(pids, duration_s)` | Poll live data for up to 30 s; per-PID min/max/mean/last and the measured rate |
 | `obd_read_dtcs(kind)` | `stored`, `pending`, `permanent` or `all` |
 | `obd_read_freeze_frame(frame)` | The values each ECU captured when it stored a code |
 | `obd_read_readiness(this_cycle)` | Which emissions monitors have run, and which have not |

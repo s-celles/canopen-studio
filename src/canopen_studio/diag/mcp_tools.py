@@ -34,6 +34,7 @@ from .interface import DiagnosticError, DiagnosticInterface
 from .j1979.client import J1979Client
 from .j1979.dtc import DTC_MODES
 from .j1979.pids import parse_key
+from .j1979.polling import PidPoller, summarise as summarise_samples
 from .native import NativeCanDiagnosticInterface, QueueFrameSource
 from .profiles.library import ProfileLibrary, default_library
 from .profiles.resolver import ProfileMatch, ProfileResolver
@@ -281,6 +282,56 @@ def obd_read_pid(pid: str, mode: int = 1) -> Dict[str, Any]:
     }
 
 
+# An agent's sampling window is bounded: the session is held for its whole length.
+MAX_SAMPLE_SECONDS = 30.0
+
+
+def obd_sample_pids(pids: List[str], duration_s: float = 5.0) -> Dict[str, Any]:
+    """Poll live-data PIDs repeatedly for a while, and summarise how they moved.
+
+    Where obd_read_pid takes one reading, this watches: every PID is asked over and over
+    for `duration_s` seconds, and each comes back with its count, last value and, for
+    numbers, min, max and mean. The measured request rate is reported too — an ELM327
+    answers one request at a time, so the more PIDs, the longer each waits between
+    readings, and `refresh_interval_s` says by how much.
+
+    Args:
+        pids: Mode 01 PIDs, each as "0C", "01:0C" or a profile name ("engine_speed").
+        duration_s: How long to sample, at most 30 seconds.
+    """
+    client = _require_session()
+
+    resolved = []
+    for text in pids:
+        definition = client.table.by_name(str(text).strip())
+        if definition is not None:
+            mode, pid = definition.mode, definition.pid
+        else:
+            try:
+                mode, pid = _parse_pid(str(text), 1)
+            except ValueError as exc:
+                return {"error": str(exc)}
+        if mode != 1:
+            return {"error": f"{text!r} is mode {mode:02X}; only live data (mode 01) can be sampled"}
+        resolved.append(pid)
+    if not resolved:
+        return {"error": "give at least one PID to sample"}
+
+    duration = min(max(float(duration_s), 0.0), MAX_SAMPLE_SECONDS)
+    samples = []
+    poller = PidPoller(client, resolved, on_cycle=lambda cycle, _stats: samples.extend(cycle))
+    stats = poller.run(duration=duration)
+
+    result: Dict[str, Any] = {
+        "duration_s": duration,
+        "rate": stats.as_dict(),
+        "parameters": summarise_samples(samples),
+    }
+    if poller.error is not None:
+        result["error"] = f"the link was lost while sampling: {poller.error}"
+    return result
+
+
 def _parse_pid(text: str, mode: int) -> tuple:
     """Read a PID given as `0C`, `0x0C` or `01:0C`."""
     cleaned = text.strip()
@@ -449,6 +500,7 @@ READ_TOOLS = (
     obd_status,
     obd_list_supported_pids,
     obd_read_pid,
+    obd_sample_pids,
     obd_read_dtcs,
     obd_read_freeze_frame,
     obd_read_readiness,
