@@ -31,12 +31,13 @@ from .elm327.interface import ElmDiagnosticInterface
 from .elm327.ble import BleElmTransport
 from .elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from .interface import DiagnosticError, DiagnosticInterface
-from .j1979.client import J1979Client
+from .j1979.client import J1979Client, VehicleIdentity
 from .j1979.dtc import DTC_MODES
 from .j1979.pids import parse_key
 from .j1979.polling import PidPoller, summarise as summarise_samples
 from .native import NativeCanDiagnosticInterface, QueueFrameSource
-from .profiles.library import ProfileLibrary, default_library
+from .profiles.library import ProfileLibrary, default_library, reload_default_library
+from .profiles.model import ProfileError
 from .profiles.resolver import ProfileMatch, ProfileResolver
 from .security import WriteGate, agent_write_warning, agent_writes_enabled, clear_trouble_codes
 
@@ -45,6 +46,10 @@ _session: Optional[DiagnosticInterface] = None
 _client: Optional[J1979Client] = None
 _match: Optional[ProfileMatch] = None
 _frame_source: Optional[QueueFrameSource] = None
+# What the vehicle said and which profile was asked for, kept so that reloading the
+# profiles can resolve again without asking the vehicle a second time.
+_identity: Optional[VehicleIdentity] = None
+_manual_profile: Optional[str] = None
 
 # Set by canopen_studio.gui when the tools run inside the application, so a native
 # session can borrow the bus the capture loop already owns.
@@ -84,11 +89,13 @@ def _gate(agent: bool = False) -> WriteGate:
 
 
 def _reset_state() -> None:
-    global _session, _client, _match, _frame_source
+    global _session, _client, _match, _frame_source, _identity, _manual_profile
     _session = None
     _client = None
     _match = None
     _frame_source = None
+    _identity = None
+    _manual_profile = None
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +138,7 @@ def obd_connect(
         profile: Vehicle profile to use, overriding automatic resolution. Omit to let
             the VIN and the supported-PID fingerprint decide.
     """
-    global _session, _client, _match, _frame_source
+    global _session, _client, _match, _frame_source, _identity, _manual_profile
 
     if _session is not None:
         return {"connected": True, "message": "Already connected — call obd_disconnect() first."}
@@ -161,6 +168,8 @@ def obd_connect(
 
     _client = client
     _match = match
+    _identity = identity
+    _manual_profile = profile
 
     return {
         "connected": True,
@@ -483,6 +492,30 @@ def obd_identify_vehicle() -> Dict[str, Any]:
     return {"vehicle": identity.as_dict(), "profile": match.as_dict()}
 
 
+def obd_reload_profiles() -> Dict[str, Any]:
+    """Read the vehicle profiles from disk again, and apply them to the open session.
+
+    For trying a profile just edited — a PID added or a formula corrected — without
+    restarting the studio. The open session resolves its profile again from what the
+    vehicle already said, without asking it anything. If the generic J1979 profile no
+    longer loads, nothing is replaced and the previous profiles stay in use.
+    """
+    global _match
+    try:
+        library = reload_default_library()
+    except ProfileError as exc:
+        return {"reloaded": False, "error": str(exc), "note": "the previous profiles are still in use"}
+
+    result: Dict[str, Any] = {"reloaded": True, "count": len(library), "errors": library.errors}
+    if _client is not None and _identity is not None:
+        match = ProfileResolver(library).resolve(_identity, manual=_manual_profile)
+        _client.table = match.profile.table
+        _client.dtc_descriptions = dict(match.profile.dtc_descriptions)
+        _match = match
+        result["profile"] = match.as_dict()
+    return result
+
+
 def obd_list_profiles() -> Dict[str, Any]:
     """List the vehicle profiles available, for choosing one by hand in obd_connect()."""
     library = _library()
@@ -507,6 +540,7 @@ READ_TOOLS = (
     obd_read_vin,
     obd_identify_vehicle,
     obd_list_profiles,
+    obd_reload_profiles,
 )
 
 # Tools that can change the vehicle. Registered unconditionally so that the refusal is a

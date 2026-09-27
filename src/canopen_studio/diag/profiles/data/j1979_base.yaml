@@ -757,6 +757,79 @@ pids:
     name: supported_pids_61_80
     description: PIDs supported [61 - 80]
     bytes: 4
+  "01:61":
+    name: driver_demand_torque
+    description: Driver's demand engine, percent torque
+    bytes: 1
+    unit: "%"
+    formula: A - 125
+    min: -125
+    max: 130
+  "01:62":
+    name: actual_engine_torque
+    description: Actual engine, percent torque
+    bytes: 1
+    unit: "%"
+    formula: A - 125
+    min: -125
+    max: 130
+  "01:63":
+    name: engine_reference_torque
+    description: Engine reference torque, the 100 % that percent torques refer to
+    bytes: 2
+    unit: "N·m"
+    formula: 256 * A + B
+    min: 0
+    max: 65535
+  "01:65":
+    name: auxiliary_io_status
+    description: Auxiliary input / output status
+    bytes: 2
+    bits:
+      "A.0": power_take_off_status_supported
+      "A.1": automatic_transmission_status_supported
+      "A.2": manual_transmission_status_supported
+      "A.3": glow_plug_lamp_status_supported
+      "B.0": power_take_off_active
+      "B.1": automatic_transmission_in_forward_or_reverse
+      "B.2": manual_transmission_in_gear
+      "B.3": glow_plug_lamp_on
+  "01:80":
+    name: supported_pids_81_a0
+    description: PIDs supported [81 - A0]
+    bytes: 4
+  "01:8E":
+    name: engine_friction_torque
+    description: Engine friction, percent torque
+    bytes: 1
+    unit: "%"
+    formula: A - 125
+    min: -125
+    max: 130
+  "01:9E":
+    name: engine_exhaust_flow_rate
+    description: Engine exhaust flow rate
+    bytes: 2
+    unit: kg/h
+    formula: (256 * A + B) / 5
+    min: 0
+    max: 13107
+  "01:A0":
+    name: supported_pids_a1_c0
+    description: PIDs supported [A1 - C0]
+    bytes: 4
+  "01:A6":
+    name: odometer
+    description: Odometer, as the vehicle counts it
+    bytes: 4
+    unit: km
+    formula: (16777216 * A + 65536 * B + 256 * C + D) / 10
+    min: 0
+    max: 429496729.5
+  "01:C0":
+    name: supported_pids_c1_e0
+    description: PIDs supported [C1 - E0]
+    bytes: 4
 
   # -- Mode 09: vehicle information -----------------------------------------
   "09:00":

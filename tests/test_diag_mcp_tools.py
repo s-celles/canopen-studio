@@ -69,13 +69,15 @@ def session(monkeypatch):
 
     library = ProfileLibrary().load()
     client = J1979Client(interface)
-    match = ProfileResolver(library).resolve(client.identify())
+    identity = client.identify()
+    match = ProfileResolver(library).resolve(identity)
     client.table = match.profile.table
     client.dtc_descriptions = dict(match.profile.dtc_descriptions)
 
     monkeypatch.setattr(tools, "_session", interface)
     monkeypatch.setattr(tools, "_client", client)
     monkeypatch.setattr(tools, "_match", match)
+    monkeypatch.setattr(tools, "_identity", identity)
     return interface
 
 
@@ -476,3 +478,50 @@ class TestSampling:
 
     def test_nothing_to_sample_is_reported(self, session):
         assert "error" in tools.obd_sample_pids([])
+
+
+class TestReloadingProfiles:
+    def test_a_reload_reads_the_profiles_again(self):
+        from canopen_studio.diag.profiles import library
+
+        before = library.default_library()
+
+        result = tools.obd_reload_profiles()
+
+        assert result["reloaded"] is True
+        assert result["count"] >= 1
+        assert library.default_library() is not before
+
+    def test_the_open_session_takes_the_reloaded_table_without_asking_the_vehicle(self, session):
+        client = tools._client
+        old_table = client.table
+        asked = len(session.transport.commands)
+
+        result = tools.obd_reload_profiles()
+
+        assert client.table is not old_table
+        assert client.table.get(1, 0x0C) is not None
+        assert result["profile"]["profile"]["id"] == tools._match.profile.id
+        assert len(session.transport.commands) == asked
+
+    def test_without_a_session_nothing_is_resolved(self):
+        assert "profile" not in tools.obd_reload_profiles()
+
+    def test_a_broken_generic_profile_keeps_the_previous_ones(self, session, monkeypatch):
+        from canopen_studio.diag.profiles import library
+        from canopen_studio.diag.profiles.model import ProfileError
+
+        before = library.default_library()
+        table = tools._client.table
+
+        def broken(self):
+            raise ProfileError("j1979_base: not valid YAML")
+
+        monkeypatch.setattr(library.ProfileLibrary, "base", broken)
+
+        result = tools.obd_reload_profiles()
+
+        assert result["reloaded"] is False
+        assert "previous" in result["note"]
+        assert library.default_library() is before
+        assert tools._client.table is table

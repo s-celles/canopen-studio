@@ -207,3 +207,22 @@ def default_library() -> ProfileLibrary:
     if _default_library is None:
         _default_library = ProfileLibrary().load()
     return _default_library
+
+
+def reload_default_library() -> ProfileLibrary:
+    """
+    Read the profiles from disk again and replace the shared copy.
+
+    So that a profile edited while the studio runs can be tried at once. The new copy
+    replaces the old only if the generic J1979 profile still resolves: a broken edit to
+    it would otherwise leave every session without a fallback. Another file that fails
+    to parse is skipped and reported in `errors`, as at startup.
+
+    Raises:
+        ProfileError: If the generic profile no longer resolves. The previous copy stays.
+    """
+    global _default_library
+    fresh = ProfileLibrary().load()
+    fresh.base()
+    _default_library = fresh
+    return fresh

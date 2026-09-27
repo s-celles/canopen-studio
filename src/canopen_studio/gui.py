@@ -56,7 +56,8 @@ from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_P
 from canopen_studio.diag.j1979.client import J1979Client
 from canopen_studio.diag.j1979.polling import CsvRecorder, PidPoller
 from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource
-from canopen_studio.diag.profiles.library import ProfileLibrary
+from canopen_studio.diag.profiles.library import ProfileLibrary, reload_default_library
+from canopen_studio.diag.profiles.model import ProfileError
 from canopen_studio.diag.profiles.resolver import ProfileResolver
 from canopen_studio.updater import (
     CURRENT_VERSION,
@@ -231,6 +232,7 @@ class CanStudioApp(tk.Tk):
         self.diag_session = None
         self.diag_client: Optional[J1979Client] = None
         self.diag_match = None
+        self.diag_identity = None
         self.diag_frame_source: Optional[QueueFrameSource] = None
         self.diag_busy = False
         # Continuous polling, when running. It owns the session until it stops.
@@ -1306,9 +1308,10 @@ class CanStudioApp(tk.Tk):
         self.obd_profile_combo = ttk.Combobox(row2, state="readonly", width=30)
         self.obd_profile_combo.grid(row=0, column=3, padx=4, pady=4, sticky="w")
         self._refresh_obd_profiles()
+        ttk.Button(row2, text="↻", width=3, command=self._obd_reload_profiles).grid(row=0, column=4, pady=4)
 
         self.btn_obd_connect = ttk.Button(row2, text="🔌 Connect", command=self._toggle_obd_connection)
-        self.btn_obd_connect.grid(row=0, column=4, padx=12, pady=4)
+        self.btn_obd_connect.grid(row=0, column=5, padx=12, pady=4)
 
         self.obd_status_lbl = ttk.Label(box_link, text="Not connected.", font=("Consolas", 10), foreground="#a0a0a0")
         self.obd_status_lbl.pack(fill=tk.X, pady=(8, 0))
@@ -1395,6 +1398,33 @@ class CanStudioApp(tk.Tk):
             names = []
         self.obd_profile_combo.configure(values=["(resolve automatically)", *names])
         self.obd_profile_combo.current(0)
+
+    def _obd_reload_profiles(self):
+        """Read the profiles from disk again, and apply them to the open session."""
+        chosen = self.obd_profile_combo.get()
+        try:
+            library = reload_default_library()
+        except ProfileError as exc:
+            messagebox.showerror("OBD-II", f"The profiles were not reloaded: {exc}\nThe previous ones stay in use.")
+            return
+
+        self._refresh_obd_profiles()
+        if chosen in self.obd_profile_combo.cget("values"):
+            self.obd_profile_combo.set(chosen)
+
+        message = f"{len(library)} profile(s) reloaded"
+        if library.errors:
+            message += f", {len(library.errors)} skipped: " + "; ".join(library.errors)
+        client, identity = self.diag_client, self.diag_identity
+        if client is not None and identity is not None:
+            # Resolved again from what the vehicle already said: nothing is asked of it.
+            match = ProfileResolver(library).resolve(identity, manual=self._obd_selected_profile())
+            client.table = match.profile.table
+            client.dtc_descriptions = dict(match.profile.dtc_descriptions)
+            self.diag_match = match
+            self._obd_show_identity(identity, match)
+            message += f"; the session now uses {match.profile.id}"
+        self._obd_set_status(message + ".", "#d18f00" if library.errors else "#2e8b57")
 
     def _on_obd_transport_changed(self, event=None):
         """Relabel the fields that mean different things for each adapter."""
@@ -1510,6 +1540,7 @@ class CanStudioApp(tk.Tk):
             self.diag_frame_source = source
             self.diag_client = client
             self.diag_match = match
+            self.diag_identity = identity
             self.btn_obd_connect.configure(text="⏏ Disconnect")
             self._obd_set_status(f"Connected — {session.description}", "#2e8b57")
             self._obd_show_identity(identity, match)
@@ -1539,6 +1570,7 @@ class CanStudioApp(tk.Tk):
         self.diag_frame_source = None
         self.diag_client = None
         self.diag_match = None
+        self.diag_identity = None
         if session is None:
             return
         try:
