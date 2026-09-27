@@ -261,6 +261,45 @@ at once.
 Until then the module documents the gap where the code would go, and the VCD
 writer refuses an FD frame rather than drawing one with the classic bit rules.
 
+### 4.2. OBD-II diagnostics: from reading to a full scan tool
+
+The OBD-II tab reads what a vehicle offers, once, on request. Consumer scan tools
+built on the same ELM327 adapters go further: they poll continuously, record, chart,
+and compute. Most of that is reachable from what exists, and much of it rests on one
+missing piece — a polling engine.
+
+| Feature | Status | Description |
+| :--- | :---: | :--- |
+| **All sensors / live data** | ✅ v0.5.0 | Discovery of the supported PIDs per ECU and one-shot reads, decoded through the 97 PIDs of `j1979_base.yaml`. |
+| **Trouble codes** | ✅ v0.5.0 | Stored, pending and permanent codes; clearing behind the write gates. |
+| **ECU identifiers** | ✅ v0.5.0 | VIN, answering ECUs, ECU names and calibration IDs through `identify()`. Still ahead: calibration verification numbers (09 06) and a fuller view in the GUI. |
+| **Bluetooth LE adapters** | ✅ #23 | `BleElmTransport`, and `just obd-ble-check` for a first contact that cannot reach the vehicle. |
+| **Polling engine & data logging** | ⏳ planned | Poll a chosen PID set continuously and record it to timestamped CSV. Lives in `diag/`, not in the GUI event loop, and measures the rate it actually achieves. **Foundation for the dashboard, statistics and acceleration below.** |
+| **Live dashboard** | ⏳ planned | Gauges and time-series charts fed by the polling engine, reusing the telemetry plotter. |
+| **Freeze frame** | ⏳ planned | Mode 02: the values an ECU captured when it stored a code — what the engine was doing when the lamp came on. The mode constant exists; nothing reads it yet. |
+| **Emissions readiness** | ⏳ planned | Every readiness monitor (PID 01 bytes C/D, PID 41 for the current drive cycle), mode 06 on-board test results, and a plain verdict on whether the vehicle is ready for an inspection. Today PID 01 decodes the lamp and three of the monitors. |
+| **Trip statistics** | ⏳ planned | Distance, engine time, and fuel consumption derived from MAF or fuel rate and vehicle speed, computed from the polling engine's records. |
+| **Acceleration timing** | ⏳ planned | 0–100 km/h and similar, timed on vehicle speed polled alone at the highest rate the adapter sustains. Its precision is bounded by that rate, which the result must state. |
+| **Vehicle garage** | ⏳ planned | Remember vehicles, recognise them by VIN, keep their profile and history. Profiles already exist; the persistence does not. |
+| **Settings** | ⏳ planned | Persistent preferences: units, last adapter, polling set. |
+| **ECU control (actuator tests)** | 🚫 not planned | Mode 08 and UDS `InputOutputControlByIdentifier` (0x2F) drive actuators on a vehicle people drive. They stay refused in `security.py`; if ever enabled, only behind the UDS work and the existing gates, and never through a clone adapter. |
+
+**Milestones, in order.** Sequenced by dependency, not dated:
+
+1. Freeze frame and emissions readiness — independent of the rest, small, and what a
+   diagnosis most often needs.
+2. Polling engine and data logging — the foundation of the next three.
+3. Live dashboard.
+4. Trip statistics and acceleration timing.
+5. Vehicle garage and settings.
+
+**The constraint is the adapter, not the code.** An ELM327 answers one request at a
+time, and a clone over BLE shares a few requests per second across every PID on
+screen. Its buffer also overflows when several ECUs answer one long request at once.
+The polling engine therefore measures and reports its real rate rather than promising
+one, and every derived figure — consumption, acceleration — carries the sampling
+interval it was computed from.
+
 ---
 
 ## 5. Milestone Timeline
