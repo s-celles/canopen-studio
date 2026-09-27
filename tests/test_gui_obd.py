@@ -226,3 +226,55 @@ class TestWriteNotice:
         notice = CanStudioApp._obd_write_notice(make_app())
 
         assert "readiness monitors" in notice
+
+
+class TestReadinessRows:
+    def rows(self, data):
+        from canopen_studio.diag.j1979.readiness import decode_monitor_status
+
+        return CanStudioApp.readiness_rows(decode_monitor_status(data, source=0x7E8))
+
+    def test_a_ready_vehicle_says_so(self):
+        headline, _ = self.rows(bytes([0x00, 0x07, 0x65, 0x00]))
+
+        assert headline == "All monitors complete, lamp off."
+
+    def test_a_vehicle_not_ready_names_the_lamp_and_the_monitors_that_have_not_run(self):
+        headline, _ = self.rows(bytes([0x81, 0x07, 0x65, 0x04]))
+
+        assert "lamp ON" in headline
+        assert "Evaporative system" in headline
+
+    def test_every_monitor_gets_a_row(self):
+        _, rows = self.rows(bytes([0x00, 0x07, 0x65, 0x04]))
+
+        assert ("Evaporative system", "✘ incomplete") in rows
+        assert ("Secondary air system", "— not available") in rows
+
+    def test_no_answer_suggests_the_ignition(self):
+        headline, rows = CanStudioApp.readiness_rows(None)
+
+        assert "ignition" in headline
+        assert rows == []
+
+
+class TestFreezeFrameRows:
+    def test_no_frame_is_reported_as_no_snapshot(self):
+        headline, rows = CanStudioApp.freeze_frame_rows([])
+
+        assert "No freeze frame" in headline
+        assert rows == []
+
+    def test_a_frame_names_its_code_and_lists_its_values(self):
+        from canopen_studio.diag.j1979.client import FreezeFrame
+        from canopen_studio.diag.j1979.pids import PidDefinition
+
+        rpm = PidDefinition.from_mapping(
+            "01:0C", {"name": "engine_speed", "formula": "(256 * A + B) / 4", "unit": "rpm", "bytes": 2}
+        )
+        frame = FreezeFrame(source=0x7E8, dtc="P0143", values=[rpm.decode(bytes([0x1A, 0xF8]), source=0x7E8)])
+
+        headline, rows = CanStudioApp.freeze_frame_rows([frame])
+
+        assert "P0143" in headline
+        assert rows == [("0x7E8", "engine_speed", "1726.00", "rpm")]

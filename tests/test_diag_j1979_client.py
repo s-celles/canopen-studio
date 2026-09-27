@@ -342,6 +342,112 @@ class TestIdentify:
         assert "VIN unavailable" in str(VehicleIdentity())
 
 
+def support_bitmask(*pids, base=0x00):
+    """The four bytes a support PID answers with, declaring `pids`."""
+    value = 0
+    for pid in pids:
+        value |= 1 << (0x20 - (pid - base))
+    return value.to_bytes(4, "big")
+
+
+class TestFreezeFrame:
+    SCRIPT = {
+        # The engine stored a frame for P0143; the second ECU holds none.
+        b"\x02\x02\x00": [
+            (0x7E8, bytes([0x42, 0x02, 0x00, 0x01, 0x43])),
+            (0x7E9, bytes([0x42, 0x02, 0x00, 0x00, 0x00])),
+        ],
+        b"\x02\x00\x00": [(0x7E8, bytes([0x42, 0x00, 0x00]) + support_bitmask(0x02, 0x05, 0x0C))],
+        b"\x02\x05\x00": [(0x7E8, bytes([0x42, 0x05, 0x00, 0x7B]))],
+        b"\x02\x0c\x00": [(0x7E8, bytes([0x42, 0x0C, 0x00, 0x1A, 0xF8]))],
+    }
+
+    def test_the_code_that_stored_the_frame_is_reported(self):
+        frames = client(self.SCRIPT).read_freeze_frames()
+
+        assert [(f.source, f.dtc) for f in frames] == [(0x7E8, "P0143")]
+
+    def test_the_captured_values_decode_with_the_live_data_definitions(self):
+        values = {v.name: v.value for v in client(self.SCRIPT).read_freeze_frames()[0].values}
+
+        assert values["coolant_temperature"] == pytest.approx(83.0)
+        assert values["engine_speed"] == pytest.approx(1726.0)
+
+    def test_the_trigger_pid_is_not_repeated_among_the_values(self):
+        pids = [v.pid for v in client(self.SCRIPT).read_freeze_frames()[0].values]
+
+        assert pids == [0x05, 0x0C]
+
+    def test_every_request_carries_the_frame_number(self):
+        session = client(self.SCRIPT)
+
+        session.read_freeze_frames()
+
+        assert all(request[0] != 0x02 or len(request) == 3 for request in session.interface.requests)
+
+    def test_a_vehicle_without_a_stored_code_has_no_frame_and_asks_nothing_more(self):
+        session = client({b"\x02\x02\x00": [(0x7E8, bytes([0x42, 0x02, 0x00, 0x00, 0x00]))]})
+
+        assert session.read_freeze_frames() == []
+        assert session.interface.requests == [b"\x02\x02\x00"]
+
+    def test_a_reply_for_another_frame_is_not_mistaken_for_this_one(self):
+        script = {b"\x02\x02\x00": [(0x7E8, bytes([0x42, 0x02, 0x01, 0x01, 0x43]))]}
+
+        assert client(script).read_freeze_frames() == []
+
+    def test_a_frame_serialises_for_an_agent(self):
+        payload = client(self.SCRIPT).read_freeze_frames()[0].as_dict()
+
+        assert payload["ecu"] == "0x7E8"
+        assert payload["dtc"] == "P0143"
+        assert len(payload["values"]) == 2
+
+
+class TestReadiness:
+    def test_the_monitors_since_codes_were_cleared_are_read_from_pid_01(self):
+        session = client({b"\x01\x01": [(0x7E8, bytes([0x41, 0x01, 0x00, 0x07, 0x65, 0x04]))]})
+
+        readiness = session.read_readiness()
+
+        assert readiness.scope == "since_codes_cleared"
+        assert [m.name for m in readiness.incomplete] == ["evaporative_system"]
+
+    def test_an_ecu_without_engine_monitors_does_not_turn_a_diesel_into_a_petrol_engine(self):
+        """A controller with no monitors leaves the ignition bit clear."""
+        session = client(
+            {
+                b"\x01\x01": [
+                    (0x7E8, bytes([0x41, 0x01, 0x00, 0x0F, 0x42, 0x40])),
+                    (0x7E9, bytes([0x41, 0x01, 0x00, 0x00, 0x00, 0x00])),
+                ]
+            }
+        )
+
+        readiness = session.read_readiness()
+
+        assert readiness.ignition == "compression"
+        assert "catalyst" not in {m.name for m in readiness.monitors}
+        assert readiness.sources == [0x7E8, 0x7E9]
+
+    def test_this_drive_cycle_is_read_from_pid_41(self):
+        session = client(
+            {
+                b"\x01\x41": [(0x7E8, bytes([0x41, 0x41, 0x00, 0x07, 0x42, 0x00]))],
+                b"\x01\x01": [(0x7E8, bytes([0x41, 0x01, 0x00, 0x0F, 0x42, 0x00]))],
+            }
+        )
+
+        readiness = session.read_readiness(this_cycle=True)
+
+        assert readiness.scope == "this_drive_cycle"
+        # PID 41 left the ignition bit clear; PID 01 settles it.
+        assert readiness.ignition == "compression"
+
+    def test_no_answer_is_none(self):
+        assert client().read_readiness() is None
+
+
 class TestSameApiOverBothBackends:
     """The same assertions, over a native ISO-TP session and over an ELM327."""
 
@@ -349,6 +455,10 @@ class TestSameApiOverBothBackends:
         "010C": {0x7E8: bytes([0x41, 0x0C, 0x1A, 0xF8])},
         "0902": {0x7E8: bytes([0x49, 0x02, 0x01]) + VIN.encode()},
         "03": {0x7E8: bytes([0x43, 0x01, 0x01, 0x43])},
+        "020200": {0x7E8: bytes([0x42, 0x02, 0x00, 0x01, 0x43])},
+        "020000": {0x7E8: bytes([0x42, 0x00, 0x00]) + support_bitmask(0x02, 0x0C)},
+        "020C00": {0x7E8: bytes([0x42, 0x0C, 0x00, 0x1A, 0xF8])},
+        "0101": {0x7E8: bytes([0x41, 0x01, 0x81, 0x07, 0x65, 0x04])},
     }
 
     @pytest.fixture(params=["scripted", "elm327"])
@@ -358,6 +468,10 @@ class TestSameApiOverBothBackends:
                 b"\x01\x0c": [(0x7E8, bytes([0x41, 0x0C, 0x1A, 0xF8]))],
                 b"\x09\x02": [(0x7E8, bytes([0x49, 0x02, 0x01]) + VIN.encode())],
                 b"\x03": [(0x7E8, bytes([0x43, 0x01, 0x01, 0x43]))],
+                b"\x02\x02\x00": [(0x7E8, bytes([0x42, 0x02, 0x00, 0x01, 0x43]))],
+                b"\x02\x00\x00": [(0x7E8, bytes([0x42, 0x00, 0x00]) + support_bitmask(0x02, 0x0C))],
+                b"\x02\x0c\x00": [(0x7E8, bytes([0x42, 0x0C, 0x00, 0x1A, 0xF8]))],
+                b"\x01\x01": [(0x7E8, bytes([0x41, 0x01, 0x81, 0x07, 0x65, 0x04]))],
             }
             return J1979Client(ScriptedInterface(script), table=TABLE)
 
@@ -374,6 +488,18 @@ class TestSameApiOverBothBackends:
 
     def test_the_trouble_codes_read_the_same(self, session):
         assert [code.code for code in session.read_dtcs()] == ["P0143"]
+
+    def test_a_freeze_frame_reads_the_same(self, session):
+        frame = session.read_freeze_frames()[0]
+
+        assert frame.dtc == "P0143"
+        assert frame.values[0].value == pytest.approx(1726.0)
+
+    def test_readiness_reads_the_same(self, session):
+        readiness = session.read_readiness()
+
+        assert readiness.mil_on is True
+        assert [m.name for m in readiness.incomplete] == ["evaporative_system"]
 
 
 class TestInterfaceDelegation:

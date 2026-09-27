@@ -17,14 +17,52 @@ from typing import Dict, List, Optional
 
 from ..interface import DiagnosticError, DiagnosticInterface, DiagnosticResponse, TransportError
 from .discovery import SupportedPids, discover_supported_pids
-from .dtc import DTC_MODES, TroubleCode, decode_dtc_response, sort_codes, summarise
-from .pids import MODE_CURRENT_DATA, MODE_VEHICLE_INFO, PidDefinition, PidError, PidTable, PidValue
+from .dtc import DTC_MODES, DtcError, TroubleCode, decode_dtc, decode_dtc_response, sort_codes, summarise
+from .pids import (
+    MODE_CURRENT_DATA,
+    MODE_FREEZE_FRAME,
+    MODE_VEHICLE_INFO,
+    PidDefinition,
+    PidError,
+    PidTable,
+    PidValue,
+)
+from .readiness import PID_MONITOR_STATUS, PID_MONITOR_THIS_CYCLE, Readiness, combine, decode_monitor_status
 from .vin import VinError, VinInfo, extract_vin, parse_vin
 
 # Mode 09 PID 02 carries the vehicle identification number.
 PID_VIN = 0x02
 PID_CALIBRATION_ID = 0x04
 PID_ECU_NAME = 0x0A
+
+# Mode 02 PID 02 names the trouble code that caused a freeze frame to be stored.
+PID_FREEZE_DTC = 0x02
+
+
+@dataclass
+class FreezeFrame:
+    """
+    The values one ECU captured at the moment it stored a trouble code.
+
+    Attributes:
+        source: The ECU that holds the frame.
+        frame: The frame number; 0 is the one every vehicle must keep.
+        dtc: The code that caused it, or None when the ECU did not say.
+        values: The captured PIDs, decoded with their mode 01 definitions.
+    """
+
+    source: int
+    frame: int = 0
+    dtc: Optional[str] = None
+    values: List[PidValue] = field(default_factory=list)
+
+    def as_dict(self) -> Dict[str, object]:
+        return {
+            "ecu": f"0x{self.source:X}",
+            "frame": self.frame,
+            "dtc": self.dtc,
+            "values": [value.as_dict() for value in self.values],
+        }
 
 
 @dataclass
@@ -197,6 +235,103 @@ class J1979Client:
             readings.extend(self.read_pid(pid, mode, timeout=timeout))
         return readings
 
+    # -- Freeze frame ------------------------------------------------------
+
+    def read_freeze_frames(self, frame: int = 0, timeout: Optional[float] = None) -> List[FreezeFrame]:
+        """
+        Read the freeze frame each ECU holds: what the engine was doing when a code set.
+
+        Mode 02 mirrors mode 01 with a frame number after the PID, so the captured values
+        decode with the live-data definitions. An ECU whose trigger code is 0000 holds no
+        frame and is left out — which is the usual answer on a vehicle with no fault.
+
+        Args:
+            frame: The frame to read. Frame 0 is mandatory; others are rare.
+            timeout: Seconds to allow each request.
+
+        Returns:
+            One frame per ECU that holds one, in address order.
+        """
+        frames: Dict[int, FreezeFrame] = {}
+        for reply in self.interface.positive_responses(MODE_FREEZE_FRAME, PID_FREEZE_DTC, frame, timeout=timeout):
+            data = self._payload_after_echo(reply, PID_FREEZE_DTC, frame)
+            if data is None or len(data) < 2:
+                continue
+            word = int.from_bytes(data[:2], "big")
+            if word == 0:
+                continue
+            try:
+                code = decode_dtc(word)
+            except DtcError:
+                code = None
+            frames[reply.source] = FreezeFrame(source=reply.source, frame=frame, dtc=code)
+
+        if not frames:
+            return []
+
+        supported = discover_supported_pids(self.interface, MODE_FREEZE_FRAME, timeout=timeout, suffix=(frame,))
+        wanted = sorted(
+            pid
+            for pid in supported.all
+            if pid % 0x20 != 0 and pid != PID_FREEZE_DTC and any(pid in supported.by_ecu.get(ecu, ()) for ecu in frames)
+        )
+        for pid in wanted:
+            definition = self.table.get(MODE_CURRENT_DATA, pid) or _base_definition(MODE_CURRENT_DATA, pid)
+            if definition is None:
+                definition = PidDefinition(mode=MODE_CURRENT_DATA, pid=pid, name=f"pid_01_{pid:02x}")
+            for reply in self.interface.positive_responses(MODE_FREEZE_FRAME, pid, frame, timeout=timeout):
+                held = frames.get(reply.source)
+                data = self._payload_after_echo(reply, pid, frame)
+                if held is None or data is None:
+                    continue
+                try:
+                    held.values.append(definition.decode(data, source=reply.source))
+                except PidError:
+                    raw = PidDefinition(mode=MODE_CURRENT_DATA, pid=pid, name=definition.name)
+                    held.values.append(raw.decode(data, source=reply.source))
+
+        return [frames[ecu] for ecu in sorted(frames)]
+
+    # -- Emissions readiness -----------------------------------------------
+
+    def read_readiness(self, this_cycle: bool = False, timeout: Optional[float] = None) -> Optional[Readiness]:
+        """
+        Read which emissions monitors have run, combined across every answering ECU.
+
+        Args:
+            this_cycle: Read PID 41, the current drive cycle, instead of PID 01, the
+                state since the codes were last cleared — which is what an inspection
+                reads.
+            timeout: Seconds to allow the request.
+
+        Returns:
+            The combined status, or None when no ECU answered.
+        """
+        pid = PID_MONITOR_THIS_CYCLE if this_cycle else PID_MONITOR_STATUS
+        answers = []
+        for reply in self.interface.positive_responses(MODE_CURRENT_DATA, pid, timeout=timeout):
+            data = self._payload_after_echo(reply, pid)
+            if data is not None and len(data) >= 4:
+                answers.append((reply.source, data))
+        if not answers:
+            return None
+
+        # Bytes C and D mean different monitors on a diesel. An ECU that implements no
+        # engine monitor — a transmission controller, say — leaves the ignition bit clear,
+        # so one ECU declaring compression ignition settles it for all of them.
+        compression = any(data[1] & 0x08 for _, data in answers)
+        if this_cycle and not compression:
+            since_clear = self.interface.positive_responses(MODE_CURRENT_DATA, PID_MONITOR_STATUS, timeout=timeout)
+            compression = any(
+                (data := self._payload_after_echo(reply, PID_MONITOR_STATUS)) is not None
+                and len(data) >= 2
+                and data[1] & 0x08
+                for reply in since_clear
+            )
+        return combine(
+            decode_monitor_status(data, pid, source=source, compression=compression) for source, data in answers
+        )
+
     # -- Trouble codes -----------------------------------------------------
 
     def read_dtcs(self, kind: str = "stored", timeout: Optional[float] = None) -> List[TroubleCode]:
@@ -331,9 +466,9 @@ class J1979Client:
             return {}
 
     @staticmethod
-    def _payload_after_echo(reply: DiagnosticResponse, pid: int) -> Optional[bytes]:
+    def _payload_after_echo(reply: DiagnosticResponse, pid: int, frame: Optional[int] = None) -> Optional[bytes]:
         """
-        Strip the PID echo, refusing a reply that echoes a different one.
+        Strip the PID echo, and the frame number in mode 02, refusing a mismatched reply.
 
         On a shared bus a late answer to an earlier request can still be in flight, and
         decoding it under this PID's definition would produce a plausible wrong reading.
@@ -341,7 +476,11 @@ class J1979Client:
         payload = reply.payload
         if not payload or payload[0] != pid:
             return None
-        return payload[1:]
+        if frame is None:
+            return payload[1:]
+        if len(payload) < 2 or payload[1] != frame:
+            return None
+        return payload[2:]
 
 
 def _base_definition(mode: int, pid: int) -> Optional[PidDefinition]:

@@ -325,6 +325,40 @@ def obd_read_dtcs(kind: str = "stored") -> Dict[str, Any]:
     return result
 
 
+def obd_read_freeze_frame(frame: int = 0) -> Dict[str, Any]:
+    """Read the freeze frame: the values each ECU captured when it stored a trouble code.
+
+    It answers "what was the engine doing when the lamp came on" — speed, load, coolant
+    temperature, fuel trims at that moment. An ECU with no stored code holds no frame,
+    so an empty list on a healthy vehicle is the expected answer.
+
+    Args:
+        frame: The frame number. Frame 0 is the one every vehicle keeps.
+    """
+    client = _require_session()
+    frames = client.read_freeze_frames(frame=int(frame))
+    return {"frame": int(frame), "count": len(frames), "frames": [f.as_dict() for f in frames]}
+
+
+def obd_read_readiness(this_cycle: bool = False) -> Dict[str, Any]:
+    """Read emissions readiness: which on-board monitors have run and which have not.
+
+    This is what a periodic inspection reads. `all_complete` is the strict reading —
+    lamp off and every monitor the vehicle has run — and is not itself a pass or fail:
+    some inspection regimes allow one or two incomplete monitors depending on the model
+    year. Clearing trouble codes resets every monitor to incomplete.
+
+    Args:
+        this_cycle: Report the current drive cycle (PID 41) instead of the state since
+            the codes were last cleared (PID 01).
+    """
+    client = _require_session()
+    readiness = client.read_readiness(this_cycle=bool(this_cycle))
+    if readiness is None:
+        return {"error": "no ECU reported monitor status; is the ignition on?"}
+    return readiness.as_dict()
+
+
 def obd_clear_dtcs(confirm: bool = False) -> Dict[str, Any]:
     """DESTRUCTIVE. Clear stored diagnostic trouble codes on the connected vehicle.
 
@@ -416,6 +450,8 @@ READ_TOOLS = (
     obd_list_supported_pids,
     obd_read_pid,
     obd_read_dtcs,
+    obd_read_freeze_frame,
+    obd_read_readiness,
     obd_read_vin,
     obd_identify_vehicle,
     obd_list_profiles,

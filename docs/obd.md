@@ -237,6 +237,54 @@ A code's letter comes from its top two bits — **P**owertrain, **C**hassis, **B
 gives it meaning. `P1xxx` is manufacturer-specific; `P2xxx` and `P3xxx` depend on the
 system, so the studio reports them as ambiguous rather than claiming either way.
 
+### Freeze frame
+
+When an ECU stores a code it also keeps a snapshot of the conditions at that moment —
+engine speed, load, coolant temperature, fuel trims. That snapshot is mode 02, and it
+answers the question a code alone cannot: what was the engine doing when the lamp came
+on?
+
+```python
+for frame in obd.read_freeze_frames():
+    print(frame.dtc, hex(frame.source))
+    for value in frame.values:
+        print(" ", value)
+```
+
+Mode 02 mirrors mode 01 with a frame number after the PID, so the captured values decode
+with the live-data definitions of the active profile. An ECU whose trigger code is
+`0000` holds no frame and is left out: on a vehicle with no fault the list is empty. In
+the studio, **❄ Freeze Frame** in the trouble-code panel.
+
+---
+
+## Emissions readiness
+
+A vehicle does not test its emissions systems all the time. Each on-board monitor —
+catalyst, evaporative system, oxygen sensors, EGR, and on a diesel the particulate
+filter and NOx aftertreatment — runs when its own conditions are met, and reports
+whether it has completed. An inspection reads exactly this: a lamp that is off proves
+little if the monitors that would light it have not run yet.
+
+```python
+readiness = obd.read_readiness()  # since the codes were cleared (PID 01)
+readiness.all_complete  # lamp off and every monitor run
+[m.label for m in readiness.incomplete]  # ['Evaporative system']
+
+obd.read_readiness(this_cycle=True)  # the current drive cycle (PID 41)
+```
+
+Bytes C and D of the status name different monitors on a spark-ignition and a
+compression-ignition engine, so they are decoded in code rather than by a bit table in
+the profile. When several ECUs answer, their reports are combined: the lamp is on if any
+ECU commands it, and a monitor is complete only if every ECU implementing it says so.
+
+`all_complete` is the strict reading, not a verdict. Inspection regimes differ — some
+accept one or two incomplete monitors depending on the model year — so the studio
+reports what has not run and leaves the judgement to the rules that apply. Clearing
+trouble codes resets every monitor to incomplete, which is why it sits behind the write
+gates. In the studio, **✅ Readiness** in the trouble-code panel.
+
 ---
 
 ## Vehicle identification
@@ -491,6 +539,8 @@ guards.
 | `obd_list_supported_pids(mode)` | What the vehicle declares, per ECU |
 | `obd_read_pid(pid, mode)` | Read by identifier, key or name |
 | `obd_read_dtcs(kind)` | `stored`, `pending`, `permanent` or `all` |
+| `obd_read_freeze_frame(frame)` | The values each ECU captured when it stored a code |
+| `obd_read_readiness(this_cycle)` | Which emissions monitors have run, and which have not |
 | `obd_read_vin()` | The VIN, decoded |
 | `obd_identify_vehicle()` | Everything the vehicle says about itself |
 | `obd_list_profiles()` | Profiles available for a manual choice |

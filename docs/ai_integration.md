@@ -74,8 +74,8 @@ Standalone mode has no GUI capture loop, so the bridge tools are unavailable the
 | `bridge_start(channel, hop_limit, allow_inject)` | Mirror the captured bus onto a multicast group |
 | `bridge_stop()` | Stop mirroring, leaving the bus connected |
 
-Ten further `obd_*` tools sit on the same server — one process, one port, one set of
-guards — for vehicle diagnostics. Nine of them read; `obd_clear_dtcs` can change the
+Twelve further `obd_*` tools sit on the same server — one process, one port, one set of
+guards — for vehicle diagnostics. Eleven of them read; `obd_clear_dtcs` can change the
 vehicle and passes a gate of its own. They are documented with the rest of the
 diagnostics in [OBD-II Vehicle Diagnostics](obd.md#mcp-tool-reference).
 
