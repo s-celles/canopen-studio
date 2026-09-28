@@ -50,12 +50,12 @@ import can
 from canopen_studio.bridge import CanBridge
 from canopen_studio.latency import LatencyTracker
 from canopen_studio.diag import DiagnosticError, DiagnosticWriteRefused, WriteGate, clear_trouble_codes
-from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface
-from canopen_studio.diag.elm327.ble import BleElmTransport
-from canopen_studio.diag.elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from canopen_studio.diag.j1979.client import J1979Client
-from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource
-from canopen_studio.diag.profiles.library import ProfileLibrary
+from canopen_studio.diag.j1979.polling import CsvRecorder, PidPoller
+from canopen_studio.diag.native import QueueFrameSource
+from canopen_studio.link import CAP_CANOPEN, CAP_TRACE, LINK_INTERFACES, Link, LinkError, is_elm327
+from canopen_studio.diag.profiles.library import ProfileLibrary, reload_default_library
+from canopen_studio.diag.profiles.model import ProfileError
 from canopen_studio.diag.profiles.resolver import ProfileResolver
 from canopen_studio.updater import (
     CURRENT_VERSION,
@@ -222,6 +222,17 @@ class CanStudioApp(tk.Tk):
         self.sim_bus: Optional[can.Bus] = None  # separate tx bus for simulator on network interfaces
         self.canopen_layer: Optional[CANopenLayer] = None
         self.simulator: Optional[VirtualCanopenSimulator] = None
+        # The one adapter everything talks through: a CAN bus or an ELM327. `bus`,
+        # `sim_bus` and `simulator` above are the CAN parts of it, None on an ELM327.
+        self.link: Optional[Link] = None
+        self.link_opening = False
+        # Native diagnostic sessions opened by others on this link — an agent over MCP —
+        # which the capture loop must feed as it feeds the tab's own.
+        self.extra_frame_sources: list = []
+        # What the connection chain shows: studio ⟷ adapter, and adapter ⟷ vehicle/bus.
+        self.link_state = "off"
+        self.far_state, self.far_detail = "unknown", ""
+        self._last_rx_seen = 0
         self.bridge: Optional[CanBridge] = None  # mirrors the captured bus onto the network
         self.running = False
 
@@ -230,8 +241,11 @@ class CanStudioApp(tk.Tk):
         self.diag_session = None
         self.diag_client: Optional[J1979Client] = None
         self.diag_match = None
+        self.diag_identity = None
         self.diag_frame_source: Optional[QueueFrameSource] = None
         self.diag_busy = False
+        # Continuous polling, when running. It owns the session until it stops.
+        self.diag_poller: Optional[PidPoller] = None
         self.rx_thread: Optional[threading.Thread] = None
 
         # Connection actually in use — may differ from the combobox selection when
@@ -326,36 +340,42 @@ class CanStudioApp(tk.Tk):
         # 1. Universal Hardware Connection Toolbar
         top_bar = ttk.LabelFrame(self, text=" Hardware Connection & Device Profile ", padding=8)
         top_bar.pack(fill=tk.X, padx=10, pady=5)
+        # Two rows: the link itself, then the options around it. On one row the Connect
+        # button was the first thing squeezed out of a narrow window.
+        link_row = ttk.Frame(top_bar)
+        link_row.pack(fill=tk.X)
+        options_row = ttk.Frame(top_bar)
+        options_row.pack(fill=tk.X, pady=(6, 0))
 
-        ttk.Label(top_bar, text="Interface:").pack(side=tk.LEFT, padx=3)
+        ttk.Label(link_row, text="Interface:").pack(side=tk.LEFT, padx=3)
         self.iface_combo = ttk.Combobox(
-            top_bar,
-            values=[cfg["name"] for cfg in SUPPORTED_INTERFACES.values()],
+            link_row,
+            values=[cfg["name"] for cfg in LINK_INTERFACES.values()],
             state="readonly",
             width=28,
         )
         self.iface_combo.pack(side=tk.LEFT, padx=3)
         self.iface_combo.bind("<<ComboboxSelected>>", self._on_interface_changed)
 
-        ttk.Label(top_bar, text="Channel:").pack(side=tk.LEFT, padx=(8, 3))
-        self.channel_combo = ttk.Combobox(top_bar, width=14)
+        ttk.Label(link_row, text="Channel:").pack(side=tk.LEFT, padx=(8, 3))
+        self.channel_combo = ttk.Combobox(link_row, width=14)
         self.channel_combo.pack(side=tk.LEFT, padx=3)
 
         self.simulate_var = tk.BooleanVar(value=False)
-        self.chk_simulate = ttk.Checkbutton(top_bar, text="Simulate", variable=self.simulate_var)
+        self.chk_simulate = ttk.Checkbutton(link_row, text="Simulate", variable=self.simulate_var)
         self.chk_simulate.pack(side=tk.LEFT, padx=2)
 
-        self.btn_refresh = ttk.Button(top_bar, text="↻", width=3, command=self._refresh_channels)
+        self.btn_refresh = ttk.Button(link_row, text="↻", width=3, command=self._refresh_channels)
         self.btn_refresh.pack(side=tk.LEFT, padx=2)
 
-        ttk.Label(top_bar, text="Bitrate:").pack(side=tk.LEFT, padx=(8, 3))
-        self.bitrate_combo = ttk.Combobox(top_bar, values=[str(b) for b in STANDARD_BITRATES], width=9)
+        ttk.Label(link_row, text="Bitrate:").pack(side=tk.LEFT, padx=(8, 3))
+        self.bitrate_combo = ttk.Combobox(link_row, values=[str(b) for b in STANDARD_BITRATES], width=9)
         self.bitrate_combo.set("500000")
         self.bitrate_combo.pack(side=tk.LEFT, padx=3)
 
-        ttk.Label(top_bar, text="Profile:").pack(side=tk.LEFT, padx=(8, 3))
+        ttk.Label(options_row, text="Profile:").pack(side=tk.LEFT, padx=3)
         self.profile_combo = ttk.Combobox(
-            top_bar,
+            options_row,
             values=[
                 "All / Auto",
                 "CiA 402 Generic Drive",
@@ -372,24 +392,31 @@ class CanStudioApp(tk.Tk):
         self.profile_combo.bind("<<ComboboxSelected>>", self._on_profile_changed)
 
         self.bridge_var = tk.BooleanVar(value=False)
-        self.chk_bridge = ttk.Checkbutton(top_bar, text="Bridge → Net:", variable=self.bridge_var)
+        self.chk_bridge = ttk.Checkbutton(options_row, text="Bridge → Net:", variable=self.bridge_var)
         self.chk_bridge.pack(side=tk.LEFT, padx=(8, 0))
         self.bridge_channel_combo = ttk.Combobox(
-            top_bar,
+            options_row,
             values=SUPPORTED_INTERFACES["udp_multicast"]["default_channels"],
             width=12,
         )
         self.bridge_channel_combo.set("239.0.0.1")
         self.bridge_channel_combo.pack(side=tk.LEFT, padx=3)
 
-        self.btn_connect = ttk.Button(top_bar, text="Connect", command=self._toggle_connection)
+        self.btn_connect = ttk.Button(link_row, text="Connect", command=self._toggle_connection)
         self.btn_connect.pack(side=tk.LEFT, padx=10)
 
-        btn_about = ttk.Button(top_bar, text="ℹ About", width=7, command=self._show_about)
+        btn_about = ttk.Button(options_row, text="ℹ About", width=7, command=self._show_about)
         btn_about.pack(side=tk.RIGHT, padx=4)
 
-        self.status_lbl = ttk.Label(top_bar, text="Status: Disconnected", foreground="red")
+        self.status_lbl = ttk.Label(options_row, text="Status: Disconnected", foreground="red")
         self.status_lbl.pack(side=tk.RIGHT, padx=8)
+
+        # 1b. Connection chain: two links to watch, not one. With an ELM327 the adapter
+        # can be reachable while the vehicle is not (ignition off), and that is the
+        # difference a single "Connected" hides.
+        self.chain_canvas = tk.Canvas(self, height=46, highlightthickness=0)
+        self.chain_canvas.pack(fill=tk.X, padx=10)
+        self.chain_canvas.bind("<Configure>", lambda event: self._draw_link_chain())
 
         # 2. Main Notebook (Tabs)
         self.notebook = ttk.Notebook(self)
@@ -465,22 +492,33 @@ class CanStudioApp(tk.Tk):
 
     def _get_selected_iface_key(self) -> str:
         sel_name = self.iface_combo.get()
-        for k, v in SUPPORTED_INTERFACES.items():
+        for k, v in LINK_INTERFACES.items():
             if v["name"] == sel_name:
                 return k
         return "slcan"
 
     def _on_interface_changed(self, event=None):
         self._refresh_channels()
+        # Before connecting, the chain previews what the chosen adapter will reach.
+        self._draw_link_chain()
 
     def _refresh_channels(self):
         iface_key = self._get_selected_iface_key()
-        cfg = SUPPORTED_INTERFACES[iface_key]
+        cfg = LINK_INTERFACES[iface_key]
+
+        # An ELM327 finds the vehicle's bitrate itself, and carries no raw frames to
+        # simulate or bridge: those settings would only mislead.
+        elm = is_elm327(iface_key)
+        for widget in (self.bitrate_combo, self.chk_simulate, self.chk_bridge):
+            widget.configure(state="disabled" if elm else "normal")
+        if not elm:
+            self.bitrate_combo.configure(state="normal")
 
         if cfg["has_ports"]:
             ports = list_com_ports()
             self.channel_combo["values"] = ports or cfg["default_channels"]
-            auto_port = find_canusb_port()
+            # The CANUSB finder recognises SLCAN hardware, not an ELM327.
+            auto_port = None if elm else find_canusb_port()
             if auto_port:
                 self.channel_combo.set(auto_port)
             elif ports:
@@ -959,8 +997,7 @@ class CanStudioApp(tk.Tk):
         self._send_nmt(cmd_val, node_id)
 
     def _send_nmt(self, cmd_val: int, node_id: int):
-        if not self.bus:
-            messagebox.showwarning("Warning", "Connect to the CAN bus first.")
+        if self._bus_or_warn("NMT", CAP_CANOPEN) is None:
             return
         msg = can.Message(arbitration_id=0x000, is_extended_id=False, data=[cmd_val, node_id])
         try:
@@ -970,8 +1007,7 @@ class CanStudioApp(tk.Tk):
             messagebox.showerror("NMT Error", f"Failed to send NMT frame:\n{e}")
 
     def _send_sync(self):
-        if not self.bus:
-            messagebox.showwarning("Warning", "Connect to the CAN bus first.")
+        if self._bus_or_warn("SYNC", CAP_CANOPEN) is None:
             return
         try:
             self.bus.send(can.Message(arbitration_id=0x080, is_extended_id=False, data=[]))
@@ -1016,8 +1052,7 @@ class CanStudioApp(tk.Tk):
         self.heartbeat_generator_timer = self.after(1000, self._hb_tick)
 
     def _send_custom_frame(self):
-        if not self.bus:
-            messagebox.showwarning("Warning", "Connect to the CAN bus first.")
+        if self._bus_or_warn("Transmit") is None:
             return
         try:
             cid_str = self.tx_id_entry.get().strip()
@@ -1246,39 +1281,13 @@ class CanStudioApp(tk.Tk):
     # than opening a second reader that would steal them from the trace and the plotter.
 
     def _build_obd_tab(self):
-        # Connection
-        box_link = ttk.LabelFrame(self.tab_obd, text=" Diagnostic Link ", padding=10)
+        # The link is chosen and opened in the top bar; this box only says which one
+        # the diagnostics run on, and how they identify the vehicle.
+        box_link = ttk.LabelFrame(self.tab_obd, text=" Diagnostics ", padding=10)
         box_link.pack(fill=tk.X)
 
-        row = ttk.Frame(box_link)
-        row.pack(fill=tk.X)
-
-        ttk.Label(row, text="Adapter:").grid(row=0, column=0, padx=4, pady=4, sticky="w")
-        self.obd_transport_combo = ttk.Combobox(
-            row,
-            values=[
-                "ELM327 — serial / Bluetooth SPP",
-                "ELM327 — Wi-Fi / TCP",
-                "ELM327 — Bluetooth LE",
-                "Native CAN (ISO-TP over the connected bus)",
-            ],
-            state="readonly",
-            width=38,
-        )
-        self.obd_transport_combo.current(0)
-        self.obd_transport_combo.grid(row=0, column=1, padx=4, pady=4, sticky="w")
-        self.obd_transport_combo.bind("<<ComboboxSelected>>", self._on_obd_transport_changed)
-
-        ttk.Label(row, text="Port / Host:").grid(row=0, column=2, padx=8, pady=4, sticky="w")
-        self.obd_port_entry = ttk.Entry(row, width=18)
-        self.obd_port_entry.insert(0, "/dev/ttyUSB0")
-        self.obd_port_entry.grid(row=0, column=3, padx=4, pady=4, sticky="w")
-
-        self.obd_rate_label = ttk.Label(row, text="Baud:")
-        self.obd_rate_label.grid(row=0, column=4, padx=8, pady=4, sticky="w")
-        self.obd_rate_entry = ttk.Entry(row, width=8)
-        self.obd_rate_entry.insert(0, str(DEFAULT_BAUDRATE))
-        self.obd_rate_entry.grid(row=0, column=5, padx=4, pady=4, sticky="w")
+        self.obd_link_lbl = ttk.Label(box_link, text="", font=("Consolas", 10))
+        self.obd_link_lbl.pack(fill=tk.X)
 
         row2 = ttk.Frame(box_link)
         row2.pack(fill=tk.X)
@@ -1303,11 +1312,12 @@ class CanStudioApp(tk.Tk):
         self.obd_profile_combo = ttk.Combobox(row2, state="readonly", width=30)
         self.obd_profile_combo.grid(row=0, column=3, padx=4, pady=4, sticky="w")
         self._refresh_obd_profiles()
+        ttk.Button(row2, text="↻", width=3, command=self._obd_reload_profiles).grid(row=0, column=4, pady=4)
 
-        self.btn_obd_connect = ttk.Button(row2, text="🔌 Connect", command=self._toggle_obd_connection)
-        self.btn_obd_connect.grid(row=0, column=4, padx=12, pady=4)
+        self.btn_obd_connect = ttk.Button(row2, text="🔍 Identify vehicle", command=self._obd_identify)
+        self.btn_obd_connect.grid(row=0, column=5, padx=12, pady=4)
 
-        self.obd_status_lbl = ttk.Label(box_link, text="Not connected.", font=("Consolas", 10), foreground="#a0a0a0")
+        self.obd_status_lbl = ttk.Label(box_link, text="", font=("Consolas", 10), foreground="#a0a0a0")
         self.obd_status_lbl.pack(fill=tk.X, pady=(8, 0))
 
         # Vehicle identity
@@ -1334,6 +1344,10 @@ class CanStudioApp(tk.Tk):
         ttk.Button(pid_buttons, text="🔍 Discover", command=self._obd_discover_pids).pack(side=tk.LEFT, padx=2)
         ttk.Button(pid_buttons, text="📊 Read All", command=self._obd_read_all).pack(side=tk.LEFT, padx=2)
         ttk.Button(pid_buttons, text="↻ Read Selected", command=self._obd_read_selected).pack(side=tk.LEFT, padx=2)
+        self.btn_obd_live = ttk.Button(pid_buttons, text="▶ Live", command=self._obd_toggle_live)
+        self.btn_obd_live.pack(side=tk.LEFT, padx=2)
+        self.btn_obd_record = ttk.Button(pid_buttons, text="⏺ Record…", command=self._obd_toggle_record)
+        self.btn_obd_record.pack(side=tk.LEFT, padx=2)
 
         self.obd_pid_tree = ttk.Treeview(box_pids, columns=("pid", "name", "value", "unit"), show="headings", height=12)
         for column, heading, width in (
@@ -1373,6 +1387,8 @@ class CanStudioApp(tk.Tk):
         self.obd_write_lbl = ttk.Label(box_dtc, text=self._obd_write_notice(), font=("Consolas", 9))
         self.obd_write_lbl.pack(fill=tk.X, pady=(6, 0))
 
+        self._obd_on_link_changed()
+
     def _obd_write_notice(self) -> str:
         """Say plainly whether clearing codes is possible, and what it would cost."""
         if WriteGate().enabled:
@@ -1389,36 +1405,56 @@ class CanStudioApp(tk.Tk):
         self.obd_profile_combo.configure(values=["(resolve automatically)", *names])
         self.obd_profile_combo.current(0)
 
-    def _on_obd_transport_changed(self, event=None):
-        """Relabel the fields that mean different things for each adapter."""
-        kind = self._obd_transport_kind()
-        if kind == "elm327":
-            self.obd_rate_label.configure(text="Baud:")
-            self._obd_set_entry(self.obd_port_entry, "/dev/ttyUSB0")
-            self._obd_set_entry(self.obd_rate_entry, str(DEFAULT_BAUDRATE))
-        elif kind == "elm327_tcp":
-            self.obd_rate_label.configure(text="TCP port:")
-            self._obd_set_entry(self.obd_port_entry, "192.168.0.10")
-            self._obd_set_entry(self.obd_rate_entry, str(DEFAULT_TCP_PORT))
-        elif kind == "elm327_ble":
-            # Blank means the first adapter found; a name fragment or address narrows it.
-            self.obd_rate_label.configure(text="(unused)")
-            self._obd_set_entry(self.obd_port_entry, "")
-            self._obd_set_entry(self.obd_rate_entry, "")
+    def _obd_reload_profiles(self):
+        """Read the profiles from disk again, and apply them to the open session."""
+        chosen = self.obd_profile_combo.get()
+        try:
+            library = reload_default_library()
+        except ProfileError as exc:
+            messagebox.showerror("OBD-II", f"The profiles were not reloaded: {exc}\nThe previous ones stay in use.")
+            return
+
+        self._refresh_obd_profiles()
+        if chosen in self.obd_profile_combo.cget("values"):
+            self.obd_profile_combo.set(chosen)
+
+        message = f"{len(library)} profile(s) reloaded"
+        if library.errors:
+            message += f", {len(library.errors)} skipped: " + "; ".join(library.errors)
+        client, identity = self.diag_client, self.diag_identity
+        if client is not None and identity is not None:
+            # Resolved again from what the vehicle already said: nothing is asked of it.
+            match = ProfileResolver(library).resolve(identity, manual=self._obd_selected_profile())
+            client.table = match.profile.table
+            client.dtc_descriptions = dict(match.profile.dtc_descriptions)
+            self.diag_match = match
+            self._obd_show_identity(identity, match)
+            message += f"; the session now uses {match.profile.id}"
+        self._obd_set_status(message + ".", "#d18f00" if library.errors else "#2e8b57")
+
+    def _obd_protocol(self) -> str:
+        """The ELM327 protocol chosen in the diagnostics tab, "0" to autodetect."""
+        combo = getattr(self, "obd_protocol_combo", None)
+        return (combo.get().split(" ", 1)[0] if combo is not None else "") or "0"
+
+    def _obd_on_link_changed(self):
+        """Say which link the diagnostics run on, after it opened or closed."""
+        if not hasattr(self, "obd_link_lbl"):
+            return
+        link = self.link
+        if link is None:
+            self.obd_link_lbl.configure(text="No link — connect an adapter in the top bar.", foreground="#a0a0a0")
+            self._obd_set_status("", "#a0a0a0")
+            self.obd_pid_tree.delete(*self.obd_pid_tree.get_children())
+            self.obd_dtc_tree.delete(*self.obd_dtc_tree.get_children())
+        elif link.kind == "elm327":
+            self.obd_link_lbl.configure(text=f"Runs on: {link.description}", foreground="#2e8b57")
         else:
-            self.obd_rate_label.configure(text="(unused)")
-            self._obd_set_entry(self.obd_port_entry, "(uses the connected bus)")
-            self._obd_set_entry(self.obd_rate_entry, "")
-
-    @staticmethod
-    def _obd_set_entry(entry, value: str):
-        entry.delete(0, tk.END)
-        entry.insert(0, value)
-
-    def _obd_transport_kind(self) -> str:
-        """Which adapter the combobox is on, as the key the session builder uses."""
-        index = self.obd_transport_combo.current()
-        return ("elm327", "elm327_tcp", "elm327_ble", "native")[index if index >= 0 else 0]
+            self.obd_link_lbl.configure(
+                text=f"Runs on: {link.description} — ISO-TP over the bus. "
+                "Press Identify vehicle to start; nothing is sent to the bus before.",
+                foreground="#2e8b57",
+            )
 
     def _obd_selected_profile(self) -> Optional[str]:
         """The profile chosen by hand, or None to resolve automatically."""
@@ -1427,118 +1463,98 @@ class CanStudioApp(tk.Tk):
             return None
         return text.split(" — ", 1)[0]
 
-    def build_diagnostic_session(self, kind: str, port: str, rate: str, protocol: str):
-        """
-        Build the diagnostic session an adapter choice asks for, without opening it.
-
-        Separated from the widgets so the mapping can be tested without a display.
-
-        Returns:
-            The session and, for a native session sharing the studio's bus, the queue
-            the capture loop must feed.
-        """
-        if kind == "elm327":
-            baud = int(rate) if str(rate).strip() else DEFAULT_BAUDRATE
-            return ElmDiagnosticInterface(SerialElmTransport(port, baudrate=baud), protocol=protocol), None
-
-        if kind == "elm327_tcp":
-            tcp_port = int(rate) if str(rate).strip() else DEFAULT_TCP_PORT
-            return ElmDiagnosticInterface(TcpElmTransport(port, tcp_port), protocol=protocol), None
-
-        if kind == "elm327_ble":
-            return ElmDiagnosticInterface(BleElmTransport(port), protocol=protocol), None
-
-        if kind == "native":
-            if self.bus is None:
-                raise DiagnosticError(
-                    "a native diagnostic session runs on the studio's own bus — connect one first, "
-                    "or choose an ELM327 adapter."
-                )
-            # The capture loop owns the only reader, so frames arrive through the queue.
-            source = QueueFrameSource()
-            return NativeCanDiagnosticInterface(self.bus, source=source), source
-
-        raise DiagnosticError(f"unknown adapter {kind!r}")
-
     def _forward_to_diagnostics(self, msg) -> None:
-        """Hand a captured frame to a native diagnostic session, if one is running."""
+        """Hand a captured frame to every native diagnostic session on this link."""
         source = self.diag_frame_source
         if source is not None:
             source.feed(msg)
+        for extra in list(getattr(self, "extra_frame_sources", ())):
+            extra.feed(msg)
 
-    def _toggle_obd_connection(self):
-        if self.diag_session is None:
-            self._obd_connect()
-        else:
-            self._obd_disconnect()
+    def add_frame_source(self, source) -> None:
+        """Feed a native diagnostic session opened elsewhere, such as over MCP."""
+        self.extra_frame_sources.append(source)
 
-    def _obd_connect(self):
-        protocol = self.obd_protocol_combo.get().split(" ", 1)[0] or "0"
+    def remove_frame_source(self, source) -> None:
+        if source in self.extra_frame_sources:
+            self.extra_frame_sources.remove(source)
+
+    def _obd_identify(self):
+        """Open the diagnostic session the link carries, and identify the vehicle."""
+        link = self.link
+        if link is None:
+            messagebox.showinfo("OBD-II", "Connect an adapter in the top bar first.")
+            return
+        if self.diag_busy:
+            messagebox.showinfo("OBD-II", "A diagnostic request is already running.")
+            return
+        # Identifying again starts from a clean session.
+        self._obd_close_session()
         try:
-            session, source = self.build_diagnostic_session(
-                self._obd_transport_kind(),
-                self.obd_port_entry.get().strip(),
-                self.obd_rate_entry.get().strip(),
-                protocol,
-            )
-        except (DiagnosticError, ValueError) as exc:
+            session, source = link.diagnostic_session()
+        except (LinkError, DiagnosticError) as exc:
             messagebox.showerror("OBD-II", str(exc))
             return
+        # A native session must see the frames the capture loop reads, from now on.
+        self.diag_frame_source = source
 
         manual = self._obd_selected_profile()
-        self._obd_set_status("Opening the link and identifying the vehicle…", "#d18f00")
+        self._obd_set_status("Identifying the vehicle…", "#d18f00")
+        self._set_link_chain(self.link_state, "searching", "")
 
         def work():
-            session.open()
             client = J1979Client(session)
             identity = client.identify()
             match = ProfileResolver(ProfileLibrary().load()).resolve(identity, manual=manual)
             client.table = match.profile.table
             client.dtc_descriptions = dict(match.profile.dtc_descriptions)
-            return session, source, client, identity, match
+            return client, identity, match
 
         def done(result):
-            session, source, client, identity, match = result
+            client, identity, match = result
             self.diag_session = session
-            self.diag_frame_source = source
             self.diag_client = client
             self.diag_match = match
-            self.btn_obd_connect.configure(text="⏏ Disconnect")
-            self._obd_set_status(f"Connected — {session.description}", "#2e8b57")
+            self.diag_identity = identity
+            self._obd_set_status(f"Vehicle identified — {session.description}", "#2e8b57")
             self._obd_show_identity(identity, match)
+            protocol = getattr(session, "active_protocol", None)
+            self._set_link_chain(self.link_state, "ok", self.vehicle_summary(protocol, len(identity.ecus)))
 
         def failed(exc):
-            try:
+            if session is not link.elm:
                 session.close()
-            except Exception:
-                # The link never came up; closing it is best-effort.
-                pass
-            self._obd_set_status(f"Connection failed: {exc}", "red")
+            self.diag_frame_source = None
+            self._set_link_chain(self.link_state, "error", "no answer — is the ignition on?")
+            self._obd_set_status(f"Identification failed: {exc}", "red")
             messagebox.showerror("OBD-II", str(exc))
 
         self._obd_run(work, done, failed)
 
     def _obd_close_session(self):
         """Close the diagnostic session, if any. Safe to call when there is none."""
+        poller, self.diag_poller = self.diag_poller, None
+        if poller is not None:
+            # The poller holds the session; it must let go before the link closes.
+            poller.stop(timeout=5.0)
+            self.diag_busy = False
+            self.btn_obd_live.configure(text="▶ Live")
+            self.btn_obd_record.configure(text="⏺ Record…")
         session = self.diag_session
         self.diag_session = None
         self.diag_frame_source = None
         self.diag_client = None
         self.diag_match = None
-        if session is None:
+        self.diag_identity = None
+        # On an ELM327 the session is the link itself: the link closes it, not us.
+        link = self.link
+        if session is None or (link is not None and session is link.elm):
             return
         try:
             session.close()
         except Exception:
             # A link already gone is not a reason to fail tearing the session down.
             pass
-
-    def _obd_disconnect(self):
-        self._obd_close_session()
-        self.btn_obd_connect.configure(text="🔌 Connect")
-        self._obd_set_status("Not connected.", "#a0a0a0")
-        self.obd_pid_tree.delete(*self.obd_pid_tree.get_children())
-        self.obd_dtc_tree.delete(*self.obd_dtc_tree.get_children())
 
     def _obd_set_status(self, text: str, colour: str):
         self.obd_status_lbl.configure(text=text, foreground=colour)
@@ -1649,21 +1665,129 @@ class CanStudioApp(tk.Tk):
 
         def done(results):
             for key, reading in results:
-                if not self.obd_pid_tree.exists(key):
-                    continue
-                current = list(self.obd_pid_tree.item(key, "values"))
-                if reading is None:
-                    current[2] = "no answer"
-                elif isinstance(reading.value, float):
-                    current[2] = f"{reading.value:g}"
-                elif isinstance(reading.value, (bytes, bytearray)):
-                    current[2] = reading.value.hex(" ").upper()
-                else:
-                    current[2] = str(reading.value)
-                self.obd_pid_tree.item(key, values=current)
+                self._obd_show_value(key, "no answer" if reading is None else self.format_reading(reading.value))
             self._obd_set_status(f"Read {len(results)} parameter(s).", "#2e8b57")
 
         self._obd_run(work, done)
+
+    @staticmethod
+    def format_reading(value) -> str:
+        """How a decoded value appears in the parameter table. Pure, for testing."""
+        if isinstance(value, float):
+            return f"{value:g}"
+        if isinstance(value, (bytes, bytearray)):
+            return value.hex(" ").upper()
+        return str(value)
+
+    def _obd_show_value(self, key: str, text: str):
+        if not self.obd_pid_tree.exists(key):
+            return
+        current = list(self.obd_pid_tree.item(key, "values"))
+        current[2] = text
+        self.obd_pid_tree.item(key, values=current)
+
+    # -- Live polling and recording ------------------------------------------
+    #
+    # The poller runs on its own thread and owns the session while it does, so every
+    # other request is held off through diag_busy until it has stopped.
+
+    def _obd_toggle_live(self):
+        if self.diag_poller is not None:
+            self._obd_stop_polling()
+        else:
+            self._obd_start_polling()
+
+    def _obd_toggle_record(self):
+        if self.diag_poller is not None:
+            self._obd_stop_polling()
+            return
+        path = filedialog.asksaveasfilename(
+            title="Record OBD-II parameters", defaultextension=".csv", filetypes=[("CSV files", "*.csv")]
+        )
+        if path:
+            self._obd_start_polling(record_to=path)
+
+    def _obd_start_polling(self, record_to: Optional[str] = None):
+        client = self._obd_require_session()
+        if client is None:
+            return
+        if self.diag_busy:
+            messagebox.showinfo("OBD-II", "A diagnostic request is already running.")
+            return
+        keys = list(self.obd_pid_tree.selection()) or list(self.obd_pid_tree.get_children())
+        if not keys:
+            messagebox.showinfo("OBD-II", "Discover the supported parameters first, then select the ones to watch.")
+            return
+
+        pids = [int(key.split(":")[1], 16) for key in keys]
+        try:
+            recorder = CsvRecorder(record_to) if record_to else None
+        except OSError as exc:
+            messagebox.showerror("OBD-II", f"Cannot record to {record_to}: {exc}")
+            return
+
+        def on_cycle(samples, stats):
+            rows = recorder.rows if recorder is not None else None
+            self.after(0, lambda s=samples, t=self.live_status_text(stats, rows): self._obd_on_cycle(s, t))
+
+        self.diag_busy = True
+        self.diag_poller = PidPoller(client, pids, on_cycle=on_cycle, recorder=recorder)
+        self.diag_poller.start()
+        self.btn_obd_live.configure(text="⏹ Stop")
+        self.btn_obd_record.configure(text="⏹ Stop")
+        what = f"recording to {record_to}" if record_to else "live"
+        self._obd_set_status(f"Polling {len(pids)} parameter(s), {what}…", "#d18f00")
+        self.after(500, self._obd_watch_poller)
+
+    def _obd_on_cycle(self, samples, status_text: str):
+        shown = set()
+        for sample in samples:
+            key = f"01:{sample.pid:02X}"
+            # Several ECUs can answer one PID; the table shows the first, the recording keeps all.
+            if key not in shown:
+                shown.add(key)
+                self._obd_show_value(key, self.format_reading(sample.reading.value))
+        self._obd_set_status(status_text, "#2e8b57")
+
+    def _obd_stop_polling(self):
+        poller = self.diag_poller
+        if poller is None:
+            return
+        self._obd_set_status("Stopping after the request in flight…", "#d18f00")
+        # stop() waits for the adapter's current answer, which must not freeze the UI.
+        threading.Thread(target=poller.stop, daemon=True).start()
+
+    def _obd_watch_poller(self):
+        """Notice the poller ending — asked to, or because the link was lost."""
+        poller = self.diag_poller
+        if poller is None:
+            return
+        if poller.running:
+            self.after(500, self._obd_watch_poller)
+            return
+        if poller.recorder is not None:
+            poller.recorder.close()
+        self.diag_poller = None
+        self.diag_busy = False
+        self.btn_obd_live.configure(text="▶ Live")
+        self.btn_obd_record.configure(text="⏺ Record…")
+        if poller.error is not None:
+            self._obd_set_status(f"Polling stopped: {poller.error}", "red")
+        else:
+            rows = f", {poller.recorder.rows} row(s) recorded" if poller.recorder is not None else ""
+            self._obd_set_status(f"Polling stopped after {poller.stats.cycles} cycle(s){rows}.", "#2e8b57")
+
+    @staticmethod
+    def live_status_text(stats, recorded_rows: Optional[int] = None) -> str:
+        """The status line while polling. Pure, for testing."""
+        text = f"Live — {stats.requests_per_second:.1f} requests/s"
+        if stats.recent_cycle_seconds is not None:
+            text += f", each value refreshed every {stats.recent_cycle_seconds:.1f} s"
+        if stats.errors:
+            text += f", {stats.errors} failed"
+        if recorded_rows is not None:
+            text += f" — {recorded_rows} row(s) recorded"
+        return text
 
     def _obd_read_dtcs(self):
         client = self._obd_require_session()
@@ -1935,8 +2059,7 @@ class CanStudioApp(tk.Tk):
     # Latency & Jitter Measurement Handlers
     # =========================================================================
     def _send_ping_once(self):
-        if not self.bus or not self.running:
-            messagebox.showinfo("Latency Ping", "Please connect to a bus first.")
+        if self._bus_or_warn("Latency Ping") is None or not self.running:
             return
         seq = self.latency_tracker.send_ping(self.bus)
         if seq is not None:
@@ -1948,8 +2071,7 @@ class CanStudioApp(tk.Tk):
             self.periodic_ping_timer = None
             self.btn_periodic_ping.configure(text="⏱️ Start Periodic Ping (1 Hz)")
         else:
-            if not self.bus or not self.running:
-                messagebox.showinfo("Periodic Ping", "Please connect to a bus first.")
+            if self._bus_or_warn("Periodic Ping") is None or not self.running:
                 return
             self.btn_periodic_ping.configure(text="⏹️ Stop Periodic Ping")
             self._periodic_ping_tick()
@@ -2048,7 +2170,7 @@ class CanStudioApp(tk.Tk):
     # =========================================================================
 
     def get_status_dict(self) -> Dict[str, Any]:
-        connected = self.bus is not None
+        connected = self.link is not None
         if connected and self.active_interface:
             iface_key = self.active_interface
         elif hasattr(self, "_get_selected_iface_key"):
@@ -2062,6 +2184,13 @@ class CanStudioApp(tk.Tk):
             "channel": self.active_channel,
             "bitrate": self.active_bitrate,
             "simulate": self.simulator is not None,
+            "link": None
+            if self.link is None
+            else {
+                "kind": self.link.kind,
+                "description": self.link.description,
+                "carries": sorted(self.link.capabilities),
+            },
             "bridge": self.bridge.get_status() if hasattr(self, "bridge") and self.bridge else None,
             "latency": self.latency_tracker.get_stats()
             if hasattr(self, "latency_tracker") and self.latency_tracker
@@ -2099,49 +2228,22 @@ class CanStudioApp(tk.Tk):
         simulate: bool,
         hop_limit: Optional[int] = None,
     ) -> str:
-        """Connect to a CAN bus from MCP/A2A (runs in a background thread)."""
-        if self.bus:
+        """Open the link from MCP/A2A. Runs on the caller's thread, which is not Tk's."""
+        if self.link is not None or self.link_opening:
             return "Already connected. Disconnect first."
         try:
-            from canopen_studio.interfaces import open_can_bus as _open, VirtualCanopenSimulator as _Sim
-            from canopen_studio.stack import CANopenLayer as _Layer, get_default_registry as _reg
-
-            self.bus = _open(interface, channel, bitrate, hop_limit=hop_limit)
-            if simulate:
-                self.sim_bus = _open(interface, channel, bitrate, hop_limit=hop_limit)
-                self.simulator = _Sim(self.sim_bus)
-                self.simulator.start()
-            self.canopen_layer = _Layer(bus=self.bus, registry=_reg())
-            self.active_interface, self.active_channel, self.active_bitrate = interface, channel, bitrate
-            self.running = True
-            self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
-            self.rx_thread.start()
-
-            if self.bridge_var.get():
-                bridge_channel = self.bridge_channel_combo.get().strip()
-                result = self.start_bridge(bridge_channel)
-                if self.bridge is None:
-                    messagebox.showwarning("Bridge", result)
-                else:
-                    self.status_lbl.configure(text=f"{self.status_lbl.cget('text')} | {result}")
-            # Update GUI on the main thread (status bar + refresh loop)
-            self.after(
-                0,
-                lambda: (
-                    self.status_lbl.configure(
-                        text=f"Connected: {interface} [{channel}] (via MCP/A2A)", foreground="green"
-                    ),
-                    self.btn_connect.configure(text="Disconnect"),
-                    self._update_gui_loop(),
-                ),
-            )
-            return f"Connected to {interface} [{channel}]" + (" + simulator" if simulate else "")
-        except Exception as exc:
+            link = Link(interface, channel, bitrate, simulate=simulate, hop_limit=hop_limit)
+            self.link_opening = True
+            link.open()
+        except LinkError as exc:
+            self.link_opening = False
             return f"Connection failed: {exc}"
+        self.after(0, lambda: self._link_opened(link, via="MCP/A2A"))
+        return f"Connected to {link.description}"
 
     def disconnect_from_mcp(self) -> str:
         """Disconnect from MCP/A2A (runs in a background thread)."""
-        if not self.bus:
+        if self.link is None:
             return "Not connected."
         self.after(0, self._disconnect)
         return "Disconnecting…"
@@ -2150,62 +2252,200 @@ class CanStudioApp(tk.Tk):
     # Connection Management & Processing Loop
     # =========================================================================
     def _toggle_connection(self):
-        if not self.running:
-            iface_key = self._get_selected_iface_key()
-            channel = self.channel_combo.get().strip()
-            bitrate = int(self.bitrate_combo.get())
+        if self.link is not None:
+            self._disconnect()
+        elif not self.link_opening:
+            self._connect_link()
 
-            if not channel:
-                messagebox.showerror("Error", "Please enter or select a valid channel/port.")
-                return
+    def _connect_link(self):
+        iface_key = self._get_selected_iface_key()
+        channel = self.channel_combo.get().strip()
+        elm = is_elm327(iface_key)
+        if not channel and not elm:
+            messagebox.showerror("Error", "Please enter or select a valid channel/port.")
+            return
+        try:
+            bitrate = 0 if elm else int(self.bitrate_combo.get())
+        except ValueError:
+            messagebox.showerror("Error", f"{self.bitrate_combo.get()!r} is not a bitrate.")
+            return
 
+        link = Link(
+            iface_key,
+            channel,
+            bitrate,
+            simulate=self.simulate_var.get() and not elm,
+            protocol=self._obd_protocol(),
+        )
+        self.link_opening = True
+        self.btn_connect.configure(state="disabled")
+        self.status_lbl.configure(text=f"Connecting to {link.name}…", foreground="#d18f00")
+        self._set_link_chain("connecting", "unknown", "", pending=link)
+
+        # An ELM327 resets and searches for the vehicle's protocol, which takes seconds.
+        def runner():
             try:
-                self.bus = open_can_bus(iface_key, channel, bitrate)
-            except Exception as e:
-                messagebox.showerror(
-                    "Connection Error",
-                    f"Could not open {iface_key} on '{channel}':\n{e}\n\n"
-                    f"Check adapter connections and ensure no other process is locking the device.",
-                )
+                link.open()
+            except LinkError as exc:
+                self.after(0, lambda error=exc: self._link_failed(error))
                 return
+            self.after(0, lambda: self._link_opened(link))
 
-            # Start Virtual Simulator thread if requested (or forced by Virtual mode)
-            if iface_key == "virtual" or self.simulate_var.get():
-                if iface_key == "virtual":
-                    sim_arg = channel
-                elif self.simulate_var.get():
-                    # udp_multicast (and similar) cannot receive_own_messages, so the simulator
-                    # must send on a separate bus instance so frames travel through the network
-                    # stack and are received by self.bus.
-                    self.sim_bus = open_can_bus(iface_key, channel, bitrate)
-                    sim_arg = self.sim_bus
-                else:
-                    sim_arg = self.bus
-                self.simulator = VirtualCanopenSimulator(sim_arg)
-                self.simulator.start()
+        threading.Thread(target=runner, daemon=True).start()
 
-            # Set up CANopen stack layer and active profile
+    def _link_failed(self, exc):
+        self._set_link_chain("error", "unknown", str(exc))
+        self.link_opening = False
+        self.btn_connect.configure(state="normal")
+        self.status_lbl.configure(text="Status: Disconnected", foreground="red")
+        messagebox.showerror(
+            "Connection Error",
+            f"{exc}\n\nCheck the adapter and make sure no other application is holding it.",
+        )
+
+    def _link_opened(self, link: Link, via: Optional[str] = None):
+        """Adopt a link that has just opened, on the Tk thread."""
+        self.link_opening = False
+        self.link = link
+        self.active_interface, self.active_channel, self.active_bitrate = link.interface, link.channel, link.bitrate
+        self.btn_connect.configure(state="normal", text="Disconnect")
+        suffix = f" (via {via})" if via else ""
+        self.status_lbl.configure(text=f"Connected: {link.description}{suffix}", foreground="green")
+        what = "OBD-II only — no raw CAN frames" if link.kind == "elm327" else "CAN frames, CANopen and OBD-II"
+        self.lbl_hw_info.configure(text=f"Active link: {link.name}\n{link.description}\nCarries: {what}")
+
+        if link.kind == "can":
+            self.bus, self.sim_bus, self.simulator = link.bus, link.sim_bus, link.simulator
             reg = get_default_registry()
             reg.active_profile = self.profile_combo.get()
             self.canopen_layer = CANopenLayer(bus=self.bus, registry=reg)
-            self.active_interface, self.active_channel, self.active_bitrate = iface_key, channel, bitrate
-
             self.running = True
-            self.btn_connect.configure(text="Disconnect")
-            self.status_lbl.configure(
-                text=f"Connected: {iface_key} [{channel}] @ {bitrate / 1000:g} kbps", foreground="green"
-            )
-            self.lbl_hw_info.configure(
-                text=f"Active Interface: {SUPPORTED_INTERFACES[iface_key]['name']}\n"
-                f"Channel: {channel} | Bitrate: {bitrate / 1000:g} kbps | Backend: {iface_key}"
-            )
-
             self.rx_thread = threading.Thread(target=self._rx_loop, daemon=True)
             self.rx_thread.start()
+            if self.bridge_var.get():
+                result = self.start_bridge(self.bridge_channel_combo.get().strip())
+                if self.bridge is None:
+                    messagebox.showwarning("Bridge", result)
+                else:
+                    self.status_lbl.configure(text=f"{self.status_lbl.cget('text')} | {result}")
             self._update_gui_loop()
 
+        self._obd_on_link_changed()
+        self._set_link_chain("ok", "unknown", "")
+        if link.kind == "elm327":
+            # OBD-II is all an ELM327 does, so start on it at once.
+            self._obd_identify()
         else:
-            self._disconnect()
+            self._last_rx_seen = self.stats.get("total_rx", 0)
+            self.after(1000, self._watch_bus_traffic)
+
+    # -- Connection chain --------------------------------------------------------
+
+    CHAIN_COLOURS = {"ok": "#2e8b57", "pending": "#d18f00", "error": "#c0392b", "off": "#a0a0a0"}
+
+    @staticmethod
+    def vehicle_summary(protocol: Optional[str], ecus: int) -> str:
+        """The far segment's caption once a vehicle answered. Pure, for testing."""
+        parts = [f"protocol {protocol}"] if protocol else []
+        parts.append(f"{ecus} ECU{'s' if ecus != 1 else ''}" if ecus else "answering")
+        return " · ".join(parts)
+
+    @staticmethod
+    def link_chain(interface: Optional[str], link_state: str, far_state: str, far_detail: str = ""):
+        """
+        The two segments of the connection chain, as (label, state, caption) each.
+
+        Pure, for testing. `interface` is the link's key, or None before one is chosen;
+        `link_state` is off, connecting, ok or error; `far_state` is unknown, searching,
+        ok or error. States map to the colours ok, pending, error and off.
+        """
+        elm = interface is not None and is_elm327(interface)
+        transports = {"elm327_ble": "Bluetooth LE", "elm327_serial": "USB / Bluetooth SPP", "elm327_tcp": "Wi-Fi / TCP"}
+        adapter = "ELM327" if elm else (interface or "Adapter")
+        far = "Vehicle" if elm else "CAN bus"
+
+        near_caption = {
+            "off": "not connected",
+            "connecting": "connecting…",
+            "ok": transports.get(interface or "", "connected") if elm else "connected",
+            "error": "failed",
+        }[link_state]
+        near = (
+            "Studio",
+            {"off": "off", "connecting": "pending", "ok": "ok", "error": "error"}[link_state],
+            near_caption,
+        )
+
+        if link_state != "ok":
+            far_segment = (far, "off", "")
+        elif elm:
+            caption = {
+                "unknown": "not queried yet",
+                "searching": "identifying…",
+                "ok": far_detail or "answering",
+                "error": far_detail or "no answer",
+            }[far_state]
+            far_segment = (
+                far,
+                {"unknown": "off", "searching": "pending", "ok": "ok", "error": "error"}[far_state],
+                caption,
+            )
+        else:
+            caption = {"ok": "frames flowing", "error": "no traffic"}.get(far_state, "waiting for frames")
+            far_segment = (far, {"ok": "ok", "error": "error"}.get(far_state, "pending"), caption)
+        return adapter, near, far_segment
+
+    def _set_link_chain(self, link_state: str, far_state: str, far_detail: str, pending: Optional[Link] = None):
+        self.link_state, self.far_state, self.far_detail = link_state, far_state, far_detail
+        self._chain_interface = (
+            pending.interface if pending is not None else (self.link.interface if self.link else None)
+        )
+        self._draw_link_chain()
+
+    def _draw_link_chain(self):
+        canvas = getattr(self, "chain_canvas", None)
+        if canvas is None:
+            return
+        interface = getattr(self, "_chain_interface", None)
+        if interface is None and self.link is None and hasattr(self, "iface_combo"):
+            interface = self._get_selected_iface_key()
+        adapter, (_, near_state, near_caption), (far, far_state, far_caption) = self.link_chain(
+            interface, self.link_state, self.far_state, self.far_detail
+        )
+        canvas.delete("all")
+        width = max(canvas.winfo_width(), 600)
+        xs = (60, width // 2, width - 60)
+        y = 16
+        for (x0, x1), state, caption in (
+            ((xs[0], xs[1]), near_state, near_caption),
+            ((xs[1], xs[2]), far_state, far_caption),
+        ):
+            colour = self.CHAIN_COLOURS[state]
+            canvas.create_line(x0 + 40, y, x1 - 40, y, fill=colour, width=4, dash=() if state == "ok" else (6, 4))
+            canvas.create_text((x0 + x1) // 2, y + 16, text=caption, fill=colour, font=("Segoe UI", 9))
+        for x, label in zip(xs, ("🖥 Studio", f"📶 {adapter}", f"🚗 {far}" if far == "Vehicle" else f"🔌 {far}")):
+            canvas.create_text(x, y, text=label, font=("Segoe UI", 10, "bold"))
+
+    def _watch_bus_traffic(self):
+        """On a CAN link, say whether frames are arriving, once a second."""
+        if self.link is None or self.link.kind != "can":
+            return
+        seen = self.stats.get("total_rx", 0)
+        state = "ok" if seen > self._last_rx_seen else "error"
+        self._last_rx_seen = seen
+        if state != self.far_state:
+            self._set_link_chain(self.link_state, state, "")
+        self.after(1000, self._watch_bus_traffic)
+
+    def _bus_or_warn(self, title: str, capability: str = CAP_TRACE):
+        """The CAN bus, or None after telling the user why there is none."""
+        if self.bus is not None:
+            return self.bus
+        if self.link is not None:
+            messagebox.showwarning(title, self.link.unavailable_reason(capability))
+        else:
+            messagebox.showwarning(title, "Connect to a CAN bus first.")
+        return None
 
     def _disconnect(self):
         self.running = False
@@ -2239,29 +2479,18 @@ class CanStudioApp(tk.Tk):
             self.bridge.stop()
             self.bridge = None
 
-        if self.simulator:
-            self.simulator.stop()
-            self.simulator = None
-
-        if self.sim_bus:
-            try:
-                self.sim_bus.shutdown()
-            except Exception:
-                pass
-            self.sim_bus = None
-
-        if self.bus:
-            try:
-                self.bus.shutdown()
-            except Exception:
-                pass
-            self.bus = None
+        link, self.link = self.link, None
+        if link is not None:
+            link.close()
+        self.bus = self.sim_bus = self.simulator = None
 
         self.canopen_layer = None
         self.active_interface, self.active_channel, self.active_bitrate = "", "", 0
         self.btn_connect.configure(text="Connect")
         self.status_lbl.configure(text="Status: Disconnected", foreground="red")
         self.lbl_hw_info.configure(text="Adapter: Not Connected")
+        self._obd_on_link_changed()
+        self._set_link_chain("off", "unknown", "")
 
     def start_bridge(
         self,

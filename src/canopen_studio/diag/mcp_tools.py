@@ -31,11 +31,13 @@ from .elm327.interface import ElmDiagnosticInterface
 from .elm327.ble import BleElmTransport
 from .elm327.transport import DEFAULT_BAUDRATE, DEFAULT_TCP_PORT, SerialElmTransport, TcpElmTransport
 from .interface import DiagnosticError, DiagnosticInterface
-from .j1979.client import J1979Client
+from .j1979.client import J1979Client, VehicleIdentity
 from .j1979.dtc import DTC_MODES
 from .j1979.pids import parse_key
+from .j1979.polling import PidPoller, summarise as summarise_samples
 from .native import NativeCanDiagnosticInterface, QueueFrameSource
-from .profiles.library import ProfileLibrary, default_library
+from .profiles.library import ProfileLibrary, default_library, reload_default_library
+from .profiles.model import ProfileError
 from .profiles.resolver import ProfileMatch, ProfileResolver
 from .security import WriteGate, agent_write_warning, agent_writes_enabled, clear_trouble_codes
 
@@ -44,6 +46,18 @@ _session: Optional[DiagnosticInterface] = None
 _client: Optional[J1979Client] = None
 _match: Optional[ProfileMatch] = None
 _frame_source: Optional[QueueFrameSource] = None
+# What the vehicle said and which profile was asked for, kept so that reloading the
+# profiles can resolve again without asking the vehicle a second time.
+_identity: Optional[VehicleIdentity] = None
+_manual_profile: Optional[str] = None
+# Whether obd_disconnect may close the session. Not when it is an ELM327 link's own
+# session: the link owns it, and only disconnecting the link closes it.
+_session_owned = True
+# The frame queue a native session on the current link reads from, registered with
+# whatever runs the capture loop so it can be withdrawn again.
+_registered_source: Optional[QueueFrameSource] = None
+# Provides the current link when no GUI is attached: the standalone MCP server.
+_host: Any = None
 
 # Set by canopen_studio.gui when the tools run inside the application, so a native
 # session can borrow the bus the capture loop already owns.
@@ -82,12 +96,35 @@ def _gate(agent: bool = False) -> WriteGate:
     return WriteGate(profile, agent=agent)
 
 
+def set_host(host: Any) -> None:
+    """Register what provides the current link when there is no GUI: the MCP server."""
+    global _host
+    _host = host
+
+
+def _link_host() -> Any:
+    return _app_ref if _app_ref is not None else _host
+
+
+def _current_link() -> Any:
+    host = _link_host()
+    return getattr(host, "link", None) if host is not None else None
+
+
 def _reset_state() -> None:
-    global _session, _client, _match, _frame_source
+    global _session, _client, _match, _frame_source, _identity, _manual_profile
+    global _session_owned, _registered_source
+    source, _registered_source = _registered_source, None
+    host = _link_host()
+    if source is not None and host is not None and hasattr(host, "remove_frame_source"):
+        host.remove_frame_source(source)
+    _session_owned = True
     _session = None
     _client = None
     _match = None
     _frame_source = None
+    _identity = None
+    _manual_profile = None
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +133,7 @@ def _reset_state() -> None:
 
 
 def obd_connect(
-    transport: str = "elm327",
+    transport: Optional[str] = None,
     port: str = "/dev/ttyUSB0",
     baudrate: int = DEFAULT_BAUDRATE,
     host: str = "192.168.0.10",
@@ -110,11 +147,16 @@ def obd_connect(
 ) -> Dict[str, Any]:
     """Open an OBD-II diagnostic session and identify the vehicle.
 
+    By default the session runs on the link already opened with connect(): an ELM327
+    link (connect(interface="elm327_ble"), "elm327_serial", "elm327_tcp") or a CAN
+    adapter, over which OBD-II travels as ISO-TP. One link serves everything; there is
+    no second connection to manage.
+
     Args:
-        transport: How to reach the vehicle — "elm327" for a serial or Bluetooth SPP
-            adapter, "elm327_tcp" for a Wi-Fi adapter or emulator, "elm327_ble" for a
-            Bluetooth Low Energy adapter (needs the `ble` extra), "native" to speak
-            ISO-TP over one of the studio's own CAN adapters.
+        transport: Leave unset to use the current link. For compatibility it can still
+            open a diagnostic adapter of its own — "elm327" for a serial or Bluetooth SPP
+            adapter, "elm327_tcp" for Wi-Fi, "elm327_ble" for Bluetooth LE (needs the
+            `ble` extra), "native" for ISO-TP over a CAN adapter opened for the purpose.
         port: Serial device for transport="elm327", e.g. /dev/ttyUSB0, /dev/rfcomm0, COM4.
         baudrate: Serial line rate. 38400 suits most adapters; try 9600 for an old board.
         host: Address for transport="elm327_tcp".
@@ -130,21 +172,39 @@ def obd_connect(
         profile: Vehicle profile to use, overriding automatic resolution. Omit to let
             the VIN and the supported-PID fingerprint decide.
     """
-    global _session, _client, _match, _frame_source
+    global _session, _client, _match, _frame_source, _identity, _manual_profile
+    global _session_owned, _registered_source
 
     if _session is not None:
         return {"connected": True, "message": "Already connected — call obd_disconnect() first."}
 
+    link = _current_link()
+    use_link = transport is None or (str(transport).strip().lower() in ("native", "can", "isotp") and link is not None)
     try:
-        session, source = _build_session(
-            transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device
-        )
-        session.open()
+        if use_link:
+            if link is None or not link.is_open:
+                return {
+                    "connected": False,
+                    "error": "no link is open — call connect() first, e.g. connect(interface='elm327_ble', "
+                    "channel='') for a Bluetooth LE adapter, or pass transport= to open one here",
+                }
+            session, source = link.diagnostic_session()
+            owned = session is not link.elm
+            if source is not None:
+                _link_host().add_frame_source(source)
+                _registered_source = source
+        else:
+            session, source = _build_session(
+                transport, port, baudrate, host, tcp_port, protocol, interface, channel, bitrate, ble_device
+            )
+            session.open()
+            owned = True
     except Exception as exc:
         _reset_state()
         return {"connected": False, "error": str(exc)}
 
     _session = session
+    _session_owned = owned
     _frame_source = source
 
     try:
@@ -154,12 +214,15 @@ def obd_connect(
         client.table = match.profile.table
         client.dtc_descriptions = dict(match.profile.dtc_descriptions)
     except Exception as exc:
-        session.close()
+        if owned:
+            session.close()
         _reset_state()
         return {"connected": False, "error": str(exc)}
 
     _client = client
     _match = match
+    _identity = identity
+    _manual_profile = profile
 
     return {
         "connected": True,
@@ -184,11 +247,7 @@ def _build_session(transport, port, baudrate, host, tcp_port, protocol, interfac
         return ElmDiagnosticInterface(BleElmTransport(ble_device), protocol=protocol), None
 
     if kind in ("native", "can", "isotp"):
-        if _app_ref is not None and getattr(_app_ref, "bus", None) is not None:
-            # Borrow the bus the application already owns, and take frames from its
-            # capture loop rather than opening a second reader on the same adapter.
-            source = QueueFrameSource()
-            return NativeCanDiagnosticInterface(_app_ref.bus, source=source), source
+        # With a CAN link open, obd_connect uses it instead; this opens a bus of its own.
         return NativeCanDiagnosticInterface.open_bus(interface, channel, bitrate), None
 
     raise DiagnosticError(f"unknown transport {transport!r}; expected elm327, elm327_tcp, elm327_ble or native")
@@ -199,11 +258,13 @@ def obd_disconnect() -> str:
     global _session
     if _session is None:
         return "No diagnostic session."
+    owned = _session_owned
     try:
-        _session.close()
+        if owned:
+            _session.close()
     finally:
         _reset_state()
-    return "Diagnostic session closed."
+    return "Diagnostic session closed." if owned else "Diagnostic session closed; the link stays open."
 
 
 def obd_status() -> Dict[str, Any]:
@@ -279,6 +340,56 @@ def obd_read_pid(pid: str, mode: int = 1) -> Dict[str, Any]:
         "supported": True,
         "readings": [reading.as_dict() for reading in readings],
     }
+
+
+# An agent's sampling window is bounded: the session is held for its whole length.
+MAX_SAMPLE_SECONDS = 30.0
+
+
+def obd_sample_pids(pids: List[str], duration_s: float = 5.0) -> Dict[str, Any]:
+    """Poll live-data PIDs repeatedly for a while, and summarise how they moved.
+
+    Where obd_read_pid takes one reading, this watches: every PID is asked over and over
+    for `duration_s` seconds, and each comes back with its count, last value and, for
+    numbers, min, max and mean. The measured request rate is reported too — an ELM327
+    answers one request at a time, so the more PIDs, the longer each waits between
+    readings, and `refresh_interval_s` says by how much.
+
+    Args:
+        pids: Mode 01 PIDs, each as "0C", "01:0C" or a profile name ("engine_speed").
+        duration_s: How long to sample, at most 30 seconds.
+    """
+    client = _require_session()
+
+    resolved = []
+    for text in pids:
+        definition = client.table.by_name(str(text).strip())
+        if definition is not None:
+            mode, pid = definition.mode, definition.pid
+        else:
+            try:
+                mode, pid = _parse_pid(str(text), 1)
+            except ValueError as exc:
+                return {"error": str(exc)}
+        if mode != 1:
+            return {"error": f"{text!r} is mode {mode:02X}; only live data (mode 01) can be sampled"}
+        resolved.append(pid)
+    if not resolved:
+        return {"error": "give at least one PID to sample"}
+
+    duration = min(max(float(duration_s), 0.0), MAX_SAMPLE_SECONDS)
+    samples = []
+    poller = PidPoller(client, resolved, on_cycle=lambda cycle, _stats: samples.extend(cycle))
+    stats = poller.run(duration=duration)
+
+    result: Dict[str, Any] = {
+        "duration_s": duration,
+        "rate": stats.as_dict(),
+        "parameters": summarise_samples(samples),
+    }
+    if poller.error is not None:
+        result["error"] = f"the link was lost while sampling: {poller.error}"
+    return result
 
 
 def _parse_pid(text: str, mode: int) -> tuple:
@@ -432,6 +543,30 @@ def obd_identify_vehicle() -> Dict[str, Any]:
     return {"vehicle": identity.as_dict(), "profile": match.as_dict()}
 
 
+def obd_reload_profiles() -> Dict[str, Any]:
+    """Read the vehicle profiles from disk again, and apply them to the open session.
+
+    For trying a profile just edited — a PID added or a formula corrected — without
+    restarting the studio. The open session resolves its profile again from what the
+    vehicle already said, without asking it anything. If the generic J1979 profile no
+    longer loads, nothing is replaced and the previous profiles stay in use.
+    """
+    global _match
+    try:
+        library = reload_default_library()
+    except ProfileError as exc:
+        return {"reloaded": False, "error": str(exc), "note": "the previous profiles are still in use"}
+
+    result: Dict[str, Any] = {"reloaded": True, "count": len(library), "errors": library.errors}
+    if _client is not None and _identity is not None:
+        match = ProfileResolver(library).resolve(_identity, manual=_manual_profile)
+        _client.table = match.profile.table
+        _client.dtc_descriptions = dict(match.profile.dtc_descriptions)
+        _match = match
+        result["profile"] = match.as_dict()
+    return result
+
+
 def obd_list_profiles() -> Dict[str, Any]:
     """List the vehicle profiles available, for choosing one by hand in obd_connect()."""
     library = _library()
@@ -449,12 +584,14 @@ READ_TOOLS = (
     obd_status,
     obd_list_supported_pids,
     obd_read_pid,
+    obd_sample_pids,
     obd_read_dtcs,
     obd_read_freeze_frame,
     obd_read_readiness,
     obd_read_vin,
     obd_identify_vehicle,
     obd_list_profiles,
+    obd_reload_profiles,
 )
 
 # Tools that can change the vehicle. Registered unconditionally so that the refusal is a

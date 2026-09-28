@@ -24,7 +24,7 @@ from fastmcp import FastMCP
 
 from canopen_studio import agent_security as _sec
 from canopen_studio.diag import mcp_tools as _diag_tools
-from canopen_studio.interfaces import open_can_bus, VirtualCanopenSimulator
+from canopen_studio.link import Link, LinkError
 from canopen_studio.stack import CANopenLayer, get_default_registry
 
 if TYPE_CHECKING:
@@ -73,13 +73,33 @@ def diagnostic_write_notice() -> str | None:
 # ---------------------------------------------------------------------------
 _app_ref: Any = None  # set by canopen_studio.gui when running integrated
 _standalone_bus: can.Bus | None = None
-_standalone_sim_bus: can.Bus | None = None
-_standalone_simulator: VirtualCanopenSimulator | None = None
 _standalone_layer: CANopenLayer | None = None
 _standalone_trace: list[dict] = []
 _standalone_tx_count = 0
 _standalone_running = False
 _standalone_rx_thread: threading.Thread | None = None
+# The one link, CAN or ELM327; `_standalone_bus` above is its CAN bus, None on an ELM327.
+_standalone_link: Link | None = None
+# Native diagnostic sessions reading from the standalone capture loop.
+_standalone_frame_sources: list = []
+
+
+class _StandaloneHost:
+    """Gives the diagnostic tools the current link when no GUI is attached."""
+
+    @property
+    def link(self) -> Link | None:
+        return _standalone_link
+
+    def add_frame_source(self, source) -> None:
+        _standalone_frame_sources.append(source)
+
+    def remove_frame_source(self, source) -> None:
+        if source in _standalone_frame_sources:
+            _standalone_frame_sources.remove(source)
+
+
+_diag_tools.set_host(_StandaloneHost())
 
 
 def set_app(app: Any) -> None:
@@ -95,6 +115,14 @@ def _is_connected() -> bool:
     if _app_ref is not None:
         return _app_ref.bus is not None
     return _standalone_bus is not None
+
+
+def _no_bus_message() -> str:
+    """Why there is no CAN bus to use: none connected, or the link is an ELM327."""
+    link = _app_ref.link if _app_ref is not None else _standalone_link
+    if link is not None and link.kind == "elm327":
+        return f"The current link is an ELM327: {link.unavailable_reason('trace')}."
+    return "Not connected — call connect() first."
 
 
 def _get_bus() -> can.Bus | None:
@@ -137,6 +165,8 @@ def _standalone_rx_loop() -> None:
             msg = _standalone_bus.recv(timeout=0.08)
             if not msg:
                 continue
+            for source in list(_standalone_frame_sources):
+                source.feed(msg)
             layer = _standalone_layer
             if layer:
                 parsed = layer.process_can_message(msg)
@@ -165,10 +195,17 @@ def get_status() -> dict:
     """Return the current connection status and active interface details."""
     if _app_ref is not None:
         return _app_ref.get_status_dict()
-    connected = _standalone_bus is not None
+    connected = _standalone_link is not None
     return {
         "connected": connected,
         "mode": "standalone",
+        "link": None
+        if _standalone_link is None
+        else {
+            "kind": _standalone_link.kind,
+            "description": _standalone_link.description,
+            "carries": sorted(_standalone_link.capabilities),
+        },
         "stats": {"total_tx": _standalone_tx_count},
         "message": "Connected (standalone MCP server)" if connected else "Not connected — call connect() first",
     }
@@ -225,12 +262,19 @@ def connect(
     simulate: bool = False,
     hop_limit: int | None = None,
 ) -> str:
-    """Connect to a CAN bus.
+    """Open the link: a CAN adapter, or an ELM327 for OBD-II.
+
+    One link serves everything. A CAN adapter carries the trace, CANopen and OBD-II
+    over ISO-TP; an ELM327 carries OBD-II only, since it passes no raw frames on. After
+    connecting an ELM327, call obd_connect() with no arguments.
 
     Args:
-        interface: Interface type — udp_multicast, virtual, socketcan, slcan, pcan, kvaser, gs_usb.
-        channel: Channel string (IP for udp_multicast, interface name for socketcan, port for slcan).
-        bitrate: Bus bitrate in bps (0 for udp_multicast / virtual).
+        interface: udp_multicast, virtual, socketcan, slcan, pcan, kvaser, gs_usb — or
+            elm327_serial, elm327_tcp, elm327_ble for an ELM327.
+        channel: IP for udp_multicast, interface name for socketcan, port for slcan.
+            For an ELM327: the serial port (COM4, or COM4@9600 for an older board),
+            host:port for TCP, or a BLE address or name fragment ("" for the first found).
+        bitrate: Bus bitrate in bps (0 for udp_multicast / virtual; ignored by an ELM327).
         simulate: Start the virtual CANopen simulator (nodes, SYNC, PDOs, heartbeats).
         hop_limit: udp_multicast only — IP hop limit (TTL). 1 (the default) keeps frames on
             the local network segment; raise it to reach machines on other subnets.
@@ -238,29 +282,25 @@ def connect(
     if _app_ref is not None:
         return _app_ref.connect_from_mcp(interface, channel, bitrate, simulate, hop_limit=hop_limit)
 
-    global _standalone_bus, _standalone_sim_bus, _standalone_simulator
-    global _standalone_layer, _standalone_running, _standalone_rx_thread
+    global _standalone_bus, _standalone_link, _standalone_layer, _standalone_running, _standalone_rx_thread
 
-    if _standalone_bus:
+    if _standalone_link is not None:
         return "Already connected. Call disconnect() first."
 
     try:
-        _standalone_bus = open_can_bus(interface, channel, bitrate, hop_limit=hop_limit)
-        reg = get_default_registry()
-        _standalone_layer = CANopenLayer(bus=_standalone_bus, registry=reg)
+        link = Link(interface, channel, bitrate, simulate=simulate, hop_limit=hop_limit)
+        link.open()
+    except LinkError as exc:
+        return f"Connection failed: {exc}"
 
-        if simulate:
-            _standalone_sim_bus = open_can_bus(interface, channel, bitrate, hop_limit=hop_limit)
-            _standalone_simulator = VirtualCanopenSimulator(_standalone_sim_bus)
-            _standalone_simulator.start()
-
+    _standalone_link = link
+    if link.kind == "can":
+        _standalone_bus = link.bus
+        _standalone_layer = CANopenLayer(bus=_standalone_bus, registry=get_default_registry())
         _standalone_running = True
         _standalone_rx_thread = threading.Thread(target=_standalone_rx_loop, daemon=True)
         _standalone_rx_thread.start()
-        sim_note = " + simulator" if simulate else ""
-        return f"Connected to {interface} [{channel}]{sim_note}"
-    except Exception as exc:
-        return f"Connection failed: {exc}"
+    return f"Connected to {link.description}"
 
 
 @mcp.tool()
@@ -269,26 +309,16 @@ def disconnect() -> str:
     if _app_ref is not None:
         return _app_ref.disconnect_from_mcp()
 
-    global _standalone_bus, _standalone_sim_bus, _standalone_simulator
-    global _standalone_layer, _standalone_running, _standalone_tx_count
+    global _standalone_bus, _standalone_link, _standalone_layer, _standalone_running, _standalone_tx_count
 
-    if not _standalone_bus:
+    if _standalone_link is None:
         return "Not connected."
 
+    # A diagnostic session on this link cannot outlive it.
+    _diag_tools.obd_disconnect()
     _standalone_running = False
-    if _standalone_simulator:
-        _standalone_simulator.stop()
-        _standalone_simulator = None
-    if _standalone_sim_bus:
-        try:
-            _standalone_sim_bus.shutdown()
-        except Exception:
-            pass
-        _standalone_sim_bus = None
-    try:
-        _standalone_bus.shutdown()
-    except Exception:
-        pass
+    link, _standalone_link = _standalone_link, None
+    link.close()
     _standalone_bus = None
     _standalone_layer = None
     _standalone_trace.clear()
@@ -316,7 +346,7 @@ def send_frame(can_id: int, data: list[int], extended: bool = False) -> str:
     """
     bus = _get_bus()
     if not bus:
-        return "Not connected — call connect() first."
+        return _no_bus_message()
     if len(data) > 8:
         return "Payload too long — maximum 8 bytes."
     try:
@@ -346,7 +376,7 @@ def send_nmt(command: str, node_id: int = 0) -> str:
     }
     bus = _get_bus()
     if not bus:
-        return "Not connected — call connect() first."
+        return _no_bus_message()
     cmd_byte = cmd_map.get(command.lower())
     if cmd_byte is None:
         return f"Unknown command '{command}'. Valid: {', '.join(cmd_map)}"
@@ -365,7 +395,7 @@ def send_sync() -> str:
     """Send a CANopen SYNC frame (0x080, empty payload) to trigger synchronous PDO exchange."""
     bus = _get_bus()
     if not bus:
-        return "Not connected — call connect() first."
+        return _no_bus_message()
     try:
         bus.send(can.Message(arbitration_id=0x080, is_extended_id=False, data=[]))
         _count_tx()
@@ -425,7 +455,7 @@ def sdo_read(node_id: int, index: int, subindex: int = 0) -> str:
     """
     layer = _get_layer()
     if not layer:
-        return "Not connected — call connect() first."
+        return _no_bus_message()
     try:
         layer.send_sdo_read(node_id, index, subindex)
         _count_tx()

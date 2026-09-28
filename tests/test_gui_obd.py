@@ -13,16 +13,8 @@ import pytest
 
 pytest.importorskip("tkinter", reason="GUI module requires the tkinter bindings")
 
-from canopen_studio.diag import DiagnosticError, WRITE_ENABLED_ENV  # noqa: E402
-from canopen_studio.diag.elm327.ble import BleElmTransport  # noqa: E402
-from canopen_studio.diag.elm327.interface import ElmDiagnosticInterface  # noqa: E402
-from canopen_studio.diag.elm327.transport import (  # noqa: E402
-    DEFAULT_BAUDRATE,
-    DEFAULT_TCP_PORT,
-    SerialElmTransport,
-    TcpElmTransport,
-)
-from canopen_studio.diag.native import NativeCanDiagnosticInterface, QueueFrameSource  # noqa: E402
+from canopen_studio.diag import WRITE_ENABLED_ENV  # noqa: E402
+from canopen_studio.diag.native import QueueFrameSource  # noqa: E402
 from canopen_studio.gui import CanStudioApp  # noqa: E402
 
 
@@ -35,114 +27,12 @@ def make_app(**overrides):
         "diag_match": None,
         "diag_frame_source": None,
         "diag_busy": False,
+        "diag_poller": None,
+        "diag_identity": None,
+        "link": None,
     }
     state.update(overrides)
     return types.SimpleNamespace(**state)
-
-
-def build(app, kind, port="/dev/ttyUSB0", rate="", protocol="0"):
-    return CanStudioApp.build_diagnostic_session(app, kind, port, rate, protocol)
-
-
-class TestSerialAdapter:
-    def test_a_serial_choice_builds_an_elm327_session(self):
-        session, source = build(make_app(), "elm327", port="/dev/ttyUSB0")
-
-        assert isinstance(session, ElmDiagnosticInterface)
-        assert isinstance(session.transport, SerialElmTransport)
-        assert source is None
-
-    def test_the_port_is_carried_through(self):
-        session, _ = build(make_app(), "elm327", port="/dev/rfcomm0")
-
-        assert session.transport.port == "/dev/rfcomm0"
-
-    def test_a_blank_rate_falls_back_to_the_usual_one(self):
-        session, _ = build(make_app(), "elm327", rate="")
-
-        assert session.transport.baudrate == DEFAULT_BAUDRATE
-
-    def test_a_given_rate_is_used(self):
-        session, _ = build(make_app(), "elm327", rate="9600")
-
-        assert session.transport.baudrate == 9600
-
-    def test_a_non_numeric_rate_is_refused(self):
-        with pytest.raises(ValueError):
-            build(make_app(), "elm327", rate="fast")
-
-    def test_the_protocol_choice_is_carried_through(self):
-        session, _ = build(make_app(), "elm327", protocol="6")
-
-        assert session.protocol_setting == "6"
-
-
-class TestTcpAdapter:
-    def test_a_wifi_choice_builds_a_tcp_session(self):
-        session, source = build(make_app(), "elm327_tcp", port="192.168.0.10")
-
-        assert isinstance(session.transport, TcpElmTransport)
-        assert source is None
-
-    def test_the_host_is_carried_through(self):
-        session, _ = build(make_app(), "elm327_tcp", port="10.0.0.5")
-
-        assert session.transport.host == "10.0.0.5"
-
-    def test_a_blank_port_falls_back_to_the_convention(self):
-        session, _ = build(make_app(), "elm327_tcp", rate="")
-
-        assert session.transport.port == DEFAULT_TCP_PORT
-
-    def test_a_given_port_is_used(self):
-        session, _ = build(make_app(), "elm327_tcp", rate="35001")
-
-        assert session.transport.port == 35001
-
-
-class TestBleAdapter:
-    def test_a_bluetooth_le_choice_builds_a_ble_session(self):
-        session, source = build(make_app(), "elm327_ble", port="OBDII")
-
-        assert isinstance(session.transport, BleElmTransport)
-        assert session.transport.device == "OBDII"
-        assert source is None
-
-    def test_a_blank_device_means_the_first_adapter_found(self):
-        session, _ = build(make_app(), "elm327_ble", port="")
-
-        assert session.transport.device is None
-
-
-class TestNativeAdapter:
-    def test_a_native_choice_borrows_the_connected_bus(self):
-        bus = object()
-        session, source = build(make_app(bus=bus), "native")
-
-        assert isinstance(session, NativeCanDiagnosticInterface)
-        assert session.bus is bus
-
-    def test_the_borrowed_bus_is_not_owned(self):
-        """Closing the diagnostic session must not shut down the studio's bus."""
-        session, _ = build(make_app(bus=object()), "native")
-
-        assert session.owns_bus is False
-
-    def test_a_native_session_takes_frames_from_a_queue(self):
-        """The capture loop owns the only reader, so it feeds the session instead."""
-        _, source = build(make_app(bus=object()), "native")
-
-        assert isinstance(source, QueueFrameSource)
-
-    def test_a_native_choice_without_a_bus_explains_itself(self):
-        with pytest.raises(DiagnosticError) as excinfo:
-            build(make_app(bus=None), "native")
-
-        assert "connect one first" in str(excinfo.value)
-
-    def test_an_unknown_adapter_is_refused(self):
-        with pytest.raises(DiagnosticError):
-            build(make_app(), "smoke signals")
 
 
 class TestFrameForwarding:
@@ -198,6 +88,26 @@ class TestSessionTeardown:
         CanStudioApp._obd_close_session(app)
 
         assert app.diag_session is None
+
+    def test_an_elm327_session_is_left_for_the_link_to_close(self):
+        """On an ELM327 the session is the link itself; only disconnecting closes it."""
+        closed = []
+        elm = types.SimpleNamespace(close=lambda: closed.append(True))
+        app = make_app(diag_session=elm, link=types.SimpleNamespace(elm=elm))
+
+        CanStudioApp._obd_close_session(app)
+
+        assert closed == []
+        assert app.diag_session is None
+
+    def test_a_native_session_is_closed_with_the_link_still_up(self):
+        closed = []
+        session = types.SimpleNamespace(close=lambda: closed.append(True))
+        app = make_app(diag_session=session, link=types.SimpleNamespace(elm=None))
+
+        CanStudioApp._obd_close_session(app)
+
+        assert closed == [True]
 
     def test_the_capture_loop_stops_feeding_a_closed_session(self):
         app = make_app(
@@ -278,3 +188,82 @@ class TestFreezeFrameRows:
 
         assert "P0143" in headline
         assert rows == [("0x7E8", "engine_speed", "1726.00", "rpm")]
+
+
+class TestLiveStatus:
+    def stats(self, **fields):
+        from canopen_studio.diag.j1979.polling import PollStats
+
+        return PollStats(**fields)
+
+    def test_the_rate_and_the_refresh_interval_are_shown(self):
+        text = CanStudioApp.live_status_text(self.stats(requests=10, elapsed=4.0, recent_cycle_seconds=2.0))
+
+        assert text == "Live — 2.5 requests/s, each value refreshed every 2.0 s"
+
+    def test_failures_and_the_recording_are_mentioned(self):
+        text = CanStudioApp.live_status_text(self.stats(requests=4, elapsed=2.0, errors=1), recorded_rows=12)
+
+        assert "1 failed" in text
+        assert "12 row(s) recorded" in text
+
+
+class TestValueFormatting:
+    def test_a_number_is_shown_compactly(self):
+        assert CanStudioApp.format_reading(1726.0) == "1726"
+
+    def test_raw_bytes_are_shown_as_spaced_hex(self):
+        assert CanStudioApp.format_reading(b"\x1a\xf8") == "1A F8"
+
+    def test_anything_else_is_shown_as_text(self):
+        assert CanStudioApp.format_reading("EOBD") == "EOBD"
+
+
+class TestConnectionChain:
+    """Two links to watch: studio to adapter, and adapter to vehicle or bus."""
+
+    def test_nothing_connected_shows_both_segments_off(self):
+        adapter, near, far = CanStudioApp.link_chain(None, "off", "unknown")
+
+        assert near == ("Studio", "off", "not connected")
+        assert far[1] == "off"
+
+    def test_an_elm327_names_its_transport(self):
+        _, near, _ = CanStudioApp.link_chain("elm327_ble", "ok", "unknown")
+
+        assert near == ("Studio", "ok", "Bluetooth LE")
+
+    def test_an_adapter_reached_but_a_vehicle_not_yet_queried(self):
+        adapter, _, far = CanStudioApp.link_chain("elm327_serial", "ok", "unknown")
+
+        assert adapter == "ELM327"
+        assert far == ("Vehicle", "off", "not queried yet")
+
+    def test_a_vehicle_that_does_not_answer_is_shown_apart_from_the_adapter(self):
+        """The case a single 'Connected' hides: adapter fine, ignition off."""
+        _, near, far = CanStudioApp.link_chain("elm327_ble", "ok", "error", "no answer — is the ignition on?")
+
+        assert near[1] == "ok"
+        assert far == ("Vehicle", "error", "no answer — is the ignition on?")
+
+    def test_an_identified_vehicle_shows_what_answered(self):
+        _, _, far = CanStudioApp.link_chain("elm327_tcp", "ok", "ok", CanStudioApp.vehicle_summary("6", 2))
+
+        assert far == ("Vehicle", "ok", "protocol 6 · 2 ECUs")
+
+    def test_a_link_still_opening_leaves_the_far_side_unknown(self):
+        _, near, far = CanStudioApp.link_chain("elm327_ble", "connecting", "unknown")
+
+        assert near[1] == "pending"
+        assert far[1] == "off"
+
+    def test_a_can_link_shows_whether_frames_arrive(self):
+        adapter, _, waiting = CanStudioApp.link_chain("slcan", "ok", "unknown")
+        _, _, flowing = CanStudioApp.link_chain("slcan", "ok", "ok")
+
+        assert adapter == "slcan"
+        assert waiting == ("CAN bus", "pending", "waiting for frames")
+        assert flowing == ("CAN bus", "ok", "frames flowing")
+
+    def test_one_ecu_is_not_plural(self):
+        assert CanStudioApp.vehicle_summary(None, 1) == "1 ECU"

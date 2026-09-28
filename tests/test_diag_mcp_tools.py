@@ -69,13 +69,15 @@ def session(monkeypatch):
 
     library = ProfileLibrary().load()
     client = J1979Client(interface)
-    match = ProfileResolver(library).resolve(client.identify())
+    identity = client.identify()
+    match = ProfileResolver(library).resolve(identity)
     client.table = match.profile.table
     client.dtc_descriptions = dict(match.profile.dtc_descriptions)
 
     monkeypatch.setattr(tools, "_session", interface)
     monkeypatch.setattr(tools, "_client", client)
     monkeypatch.setattr(tools, "_match", match)
+    monkeypatch.setattr(tools, "_identity", identity)
     return interface
 
 
@@ -452,3 +454,148 @@ class TestStartupNotice:
 
     def test_the_server_surfaces_the_same_notice(self, writes_allowed):
         assert mcp_server.diagnostic_write_notice() == tools.startup_notice()
+
+
+class TestSampling:
+    def test_sampling_summarises_each_parameter_and_the_rate(self, session):
+        result = tools.obd_sample_pids(["0C", "coolant_temperature"], duration_s=0.3)
+
+        assert result["rate"]["cycles"] >= 1
+        speed = result["parameters"]["engine_speed@0x7E8"]
+        assert speed["min"] == pytest.approx(1726.0)
+        assert "coolant_temperature@0x7E8" in result["parameters"]
+
+    def test_the_window_is_bounded(self, session, monkeypatch):
+        monkeypatch.setattr(tools, "MAX_SAMPLE_SECONDS", 0.2)
+
+        assert tools.obd_sample_pids(["0C"], duration_s=3600)["duration_s"] == 0.2
+
+    def test_only_live_data_can_be_sampled(self, session):
+        assert "mode 09" in tools.obd_sample_pids(["09:02"])["error"]
+
+    def test_an_unreadable_pid_is_reported(self, session):
+        assert "error" in tools.obd_sample_pids(["not-a-pid"])
+
+    def test_nothing_to_sample_is_reported(self, session):
+        assert "error" in tools.obd_sample_pids([])
+
+
+class TestReloadingProfiles:
+    def test_a_reload_reads_the_profiles_again(self):
+        from canopen_studio.diag.profiles import library
+
+        before = library.default_library()
+
+        result = tools.obd_reload_profiles()
+
+        assert result["reloaded"] is True
+        assert result["count"] >= 1
+        assert library.default_library() is not before
+
+    def test_the_open_session_takes_the_reloaded_table_without_asking_the_vehicle(self, session):
+        client = tools._client
+        old_table = client.table
+        asked = len(session.transport.commands)
+
+        result = tools.obd_reload_profiles()
+
+        assert client.table is not old_table
+        assert client.table.get(1, 0x0C) is not None
+        assert result["profile"]["profile"]["id"] == tools._match.profile.id
+        assert len(session.transport.commands) == asked
+
+    def test_without_a_session_nothing_is_resolved(self):
+        assert "profile" not in tools.obd_reload_profiles()
+
+    def test_a_broken_generic_profile_keeps_the_previous_ones(self, session, monkeypatch):
+        from canopen_studio.diag.profiles import library
+        from canopen_studio.diag.profiles.model import ProfileError
+
+        before = library.default_library()
+        table = tools._client.table
+
+        def broken(self):
+            raise ProfileError("j1979_base: not valid YAML")
+
+        monkeypatch.setattr(library.ProfileLibrary, "base", broken)
+
+        result = tools.obd_reload_profiles()
+
+        assert result["reloaded"] is False
+        assert "previous" in result["note"]
+        assert library.default_library() is before
+        assert tools._client.table is table
+
+
+class TestConnectingThroughTheLink:
+    """obd_connect() with no transport runs on the link connect() opened."""
+
+    class Host:
+        def __init__(self, link):
+            self.link = link
+            self.sources = []
+
+        def add_frame_source(self, source):
+            self.sources.append(source)
+
+        def remove_frame_source(self, source):
+            self.sources.remove(source)
+
+    def test_without_a_link_it_says_to_connect_first(self, monkeypatch):
+        monkeypatch.setattr(tools, "_host", self.Host(None))
+
+        result = tools.obd_connect()
+
+        assert result["connected"] is False
+        assert "connect()" in result["error"]
+
+    def test_on_an_elm327_link_the_session_is_the_adapter_itself(self, monkeypatch):
+        from canopen_studio import link as link_module
+
+        monkeypatch.setattr(link_module, "build_elm_transport", lambda interface, channel: FakeElm327(ecus=ECUS))
+        link = link_module.Link("elm327_ble", "")
+        link.open()
+        monkeypatch.setattr(tools, "_host", self.Host(link))
+
+        result = tools.obd_connect()
+
+        assert result["connected"] is True
+        assert tools._session is link.elm
+
+    def test_closing_diagnostics_leaves_an_elm327_link_open(self, monkeypatch):
+        from canopen_studio import link as link_module
+
+        monkeypatch.setattr(link_module, "build_elm_transport", lambda interface, channel: FakeElm327(ecus=ECUS))
+        link = link_module.Link("elm327_ble", "")
+        link.open()
+        monkeypatch.setattr(tools, "_host", self.Host(link))
+        tools.obd_connect()
+
+        assert "link stays open" in tools.obd_disconnect()
+        assert link.is_open
+
+    def test_on_a_can_link_a_native_session_is_fed_by_the_capture_loop(self, monkeypatch):
+        from canopen_studio import link as link_module
+        from canopen_studio.diag.j1979.client import VehicleIdentity
+        from canopen_studio.diag.native import NativeCanDiagnosticInterface
+
+        class Bus:
+            def send(self, msg):
+                pass
+
+            def shutdown(self):
+                pass
+
+        link = link_module.Link("slcan", "COM4", opener=lambda *a, **kw: Bus())
+        link.open()
+        host = self.Host(link)
+        monkeypatch.setattr(tools, "_host", host)
+        monkeypatch.setattr(tools.J1979Client, "identify", lambda self, timeout=None: VehicleIdentity())
+
+        assert tools.obd_connect()["connected"] is True
+        assert isinstance(tools._session, NativeCanDiagnosticInterface)
+        assert len(host.sources) == 1
+
+        tools.obd_disconnect()
+
+        assert host.sources == []

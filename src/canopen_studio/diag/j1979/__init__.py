@@ -24,17 +24,22 @@ from .pids import (
     parse_key,
 )
 from .readiness import Monitor, Readiness, combine as combine_readiness, decode_monitor_status
+from .polling import CsvRecorder, PidPoller, PollStats, Sample
 from .vin import VinError, VinInfo, extract_vin, is_valid_vin, parse_vin
 
 __all__ = [
     "DTC_MODES",
     "MODE_NAMES",
+    "CsvRecorder",
     "DtcError",
     "FreezeFrame",
     "Monitor",
     "Readiness",
     "combine_readiness",
     "decode_monitor_status",
+    "PidPoller",
+    "PollStats",
+    "Sample",
     "J1979Client",
     "SupportedPids",
     "TroubleCode",

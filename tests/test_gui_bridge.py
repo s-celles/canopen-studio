@@ -40,8 +40,14 @@ def make_app(**overrides):
         "active_channel": "",
         "active_bitrate": 0,
         "stats": {"total_rx": 0, "total_tx": 0},
+        "link": None,
     }
     state.update(overrides)
+    if state["bus"] is not None and "link" not in overrides:
+        # A bus only exists as the CAN part of an open link.
+        state["link"] = types.SimpleNamespace(
+            kind="can", description=state["active_interface"], capabilities=frozenset({"trace", "canopen", "obd"})
+        )
     return types.SimpleNamespace(**state)
 
 

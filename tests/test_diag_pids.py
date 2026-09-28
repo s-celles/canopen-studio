@@ -292,7 +292,7 @@ class TestShippedJ1979Table:
 
     def test_the_supported_pid_bitmasks_are_present(self, base_table):
         """Discovery walks these, so a missing one silently truncates a scan."""
-        for pid in (0x00, 0x20, 0x40, 0x60):
+        for pid in (0x00, 0x20, 0x40, 0x60, 0x80, 0xA0, 0xC0):
             assert base_table.get(MODE_CURRENT_DATA, pid) is not None
 
     @pytest.mark.parametrize(
@@ -315,12 +315,27 @@ class TestShippedJ1979Table:
             (0x5C, [0x69], 65),  # oil temperature, 105 - 40
             (0x5D, [0x69, 0x00], 0.0),  # fuel injection timing, 26880 baseline
             (0x5E, [0x00, 0xC8], 10.0),  # fuel rate, 200 / 20
+            (0x61, [0x7D], 0),  # driver's demand torque, 125 - 125
+            (0x62, [0xE1], 100),  # actual engine torque, 225 - 125
+            (0x63, [0x01, 0x2C], 300),  # engine reference torque, N·m
+            (0x8E, [0x73], -10),  # friction torque, 115 - 125
+            (0x9E, [0x03, 0xE8], 200.0),  # exhaust flow, 1000 / 5
+            (0xA6, [0x00, 0x01, 0xE2, 0x40], 12345.6),  # odometer, 123456 / 10
         ],
     )
     def test_the_common_parameters_decode_to_the_standard_values(self, base_table, pid, data, expected):
         value = base_table.get(MODE_CURRENT_DATA, pid).decode(bytes(data))
 
         assert value.value == expected
+
+    def test_the_auxiliary_io_status_separates_support_from_state(self, base_table):
+        """Byte A says which flags the ECU reports; byte B holds them."""
+        value = base_table.get(MODE_CURRENT_DATA, 0x65).decode(bytes([0x06, 0x02]))
+
+        assert value.value["automatic_transmission_status_supported"] is True
+        assert value.value["automatic_transmission_in_forward_or_reverse"] is True
+        assert value.value["manual_transmission_in_gear"] is False
+        assert value.value["power_take_off_status_supported"] is False
 
     def test_a_signed_pressure_decodes_below_zero(self, base_table):
         value = base_table.get(MODE_CURRENT_DATA, 0x54).decode(bytes([0xFF, 0xFF]))
