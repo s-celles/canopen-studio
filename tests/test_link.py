@@ -61,7 +61,7 @@ class Opener:
 
 
 class FakeSimulator:
-    made = []
+    made: list["FakeSimulator"] = []
 
     def __init__(self, channel_or_bus):
         self.target = channel_or_bus
