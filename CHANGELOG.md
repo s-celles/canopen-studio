@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-29
+
+The OBD-II tab becomes a scan tool, and the studio stops treating a CAN bus and
+a diagnostic adapter as two unrelated connections.
+
+**This is also the first release since 0.8.0.** The 0.8.2 tag was never cut, so
+everything its section below describes — CAN FD in the core frame type, the
+CI outage that had every workflow red — reaches a downloadable build here for
+the first time.
+
+The minor bump rather than a patch is deliberate: `Link` changes the MCP surface.
+`connect()` now accepts ELM327 adapters and `obd_connect()` may be called with no
+transport at all. Nothing was removed and `transport=` still works, so existing
+callers keep running.
+
+### Added
+- **ELM327 adapters over Bluetooth Low Energy.** Most dongles sold today, and every one sold as iPhone-compatible, expose a GATT service rather than a serial port, so no existing transport could reach them. `BleElmTransport` finds the adapter by scan, name or address, locates the notify/write characteristic pair (FFF0, HM-10 FFE0, Vgate 18F0, Nordic UART, or an unambiguous custom service) and presents it as an ordinary `ElmTransport`. `bleak` runs on a private event loop so the GUI and the MCP server stay synchronous. Optional `ble` extra; `transport="elm327_ble"`.
+- **`just obd-ble-check`, a first-contact check for a BLE adapter.** Plugging an unknown dongle into a car and opening the whole studio mixes two questions — does the link work, and does the vehicle answer — and tells you neither when it fails. Stage 1 sends only AT commands the ELM327 chip answers itself, so it runs with the ignition off and cannot reach the vehicle's bus. Stage 2, behind `--vehicle`, adds read-only identification and a trouble-code count; clearing codes is not offered. Exit codes tell the link, the chip and the vehicle apart.
+- **Freeze frame (mode 02).** `read_freeze_frames()` reports, per ECU, the code that stored the frame and the captured values, decoded with the mode 01 definitions. Supported-PID discovery learns to carry mode 02's frame number, and the echo check refuses a reply for another frame.
+- **Emissions readiness (PID 01 and 41).** A new readiness module decodes every monitor. Bytes C and D name different monitors on spark and compression ignition, which a flat bit table cannot express. Several ECUs are combined: the lamp is on if any commands it, a monitor is complete only if every ECU implementing it says so, and an ECU with no engine monitors cannot turn a diesel into a petrol engine. `all_complete` is the strict reading rather than a pass/fail, since inspection regimes differ.
+- **Continuous polling and recording.** OBD-II has no subscription: a value is only ever the answer to a request, so watching one change means asking again and again. `PidPoller` polls a PID set on its own thread and measures the rate it achieves over recent cycles rather than since the start, because the first request can carry the adapter's protocol search. A PID that fails is counted and skipped; a lost link ends the run. `CsvRecorder` writes one row per reading with its own UTC timestamp, so two ECUs answering one PID stay apart and nothing is invented for gaps.
+- **More of the generic J1979 profile**: 01:61, 62, 63, 65, 8E, 9E and A6, plus the support PIDs 80, A0 and C0, which previously came back as raw bytes. The multi-field PIDs (69, 7A, 87, 9A, 9D) are left raw on purpose: their scalings could not be verified, and a plausible wrong value is worse than an undecoded one.
+- **Profiles reloaded without restarting.** `reload_default_library()`, exposed as `obd_reload_profiles` over MCP and a reload button in the studio. The open session is resolved again from the identity it already holds, without asking the vehicle, and a generic profile that no longer loads leaves the previous copy in use.
+- New MCP tools: `obd_read_freeze_frame`, `obd_read_readiness`, `obd_sample_pids` (a bounded sampling window returning per-PID statistics and the measured rate) and `obd_reload_profiles`. Recording to a file is not offered to agents.
+- **A page mapping CAN, CANopen and OBD-II onto the OSI model**, naming the standard governing every layer. The three are routinely taken for alternatives when they share layers 1 and 2 entirely and differ only above them — which is why one adapter, one capture and one decoder stack serve all three.
+
+### Changed
+- **One link for CAN and ELM327.** `canopen_studio.link.Link` models one physical adapter, opened once, declaring what it can carry (trace, CANopen, OBD-II) and handing out the diagnostic session it supports. The studio had two Connect buttons: "Native CAN" in the second silently depended on the first, an ELM327 session was invisible to everything but the OBD-II tab, and MCP mirrored the split.
+  - **Studio:** one Connect in the top bar, its list now including the ELM327 adapters. The OBD-II tab loses its own link box and says which link it runs on. Tabs needing raw frames say why an ELM327 cannot serve them. A connection chain shows studio → adapter and adapter → vehicle (or bus) as two segments, because a single "Connected" hid the case that matters with an ELM327: the adapter reachable while the vehicle does not answer.
+  - **MCP:** `connect()` accepts ELM327 adapters, in the GUI and standalone. `obd_connect()` with no transport runs on the current link, and closing diagnostics on an ELM327 leaves the link open. `transport=` still works.
+- Diagnostic exchanges are serialised by a lock, so the studio, a poller and an agent can share one session.
+- Released builds bundle `bleak` and each platform's backend. The release job ran a plain `uv sync`, and even with `bleak` installed PyInstaller cannot see the backend, which `bleak` imports at run time per platform — so a released studio offered "ELM327 — Bluetooth LE" and failed on first use. CoreBluetooth with pyobjc, WinRT, BlueZ with dbus-fast are now collected explicitly.
+- pyo3 0.23 → 0.29.
+
+### Fixed
+- **An MCP session on the GUI's bus never received a frame.** The capture loop now feeds every native session on the link.
+- **A vehicle the adapter cannot fully describe is identified anyway.** On a v1.5 clone, several ECUs answering the ECU-name request (09 0A) at once overflow the adapter's buffer and it answers BUFFER FULL; `identify()` let that abort the whole session, although ECU names and calibration IDs only refine a match the VIN and supported PIDs already make. They are optional now — a failure costs the refinement, and a lost link is still raised.
+- **The OBD standard (01 1C) came back as raw bytes**, in the studio and over MCP: `identify()` runs before any profile has supplied a PID table, since its result is what selects the profile. It is labelled with the generic J1979 definition when the current table has none.
+- **On macOS the app was killed on first Bluetooth access**, for want of `NSBluetoothAlwaysUsageDescription` in its `Info.plist`. The bundle is declared and signed again ad hoc, since the edit invalidates PyInstaller's signature.
+- **The PyO3 bindings were compiled by no Rust job.** `cargo clippy --workspace` never enables the optional `python` feature, so `pyo3_bindings.rs` was seen only by the Python jobs, at their build step, minutes later — which is how the pyo3 0.29 bump merged with a green Rust job and a build that could not link. A second clippy step covers them, and the seven lints the blind spot had been hiding are cleared.
+- **Mermaid never rendered on the documentation site.** `pymdownx.superfences` was enabled without the custom fence Material needs, so every ` ```mermaid ` block became a code listing — including the two architecture diagrams in `ROADMAP.md`, published as source all along.
+
 ## [0.8.2] - 2026-09-24
 
 This release exists to publish. **v0.8.1 never produced any binaries**: its
