@@ -19,7 +19,7 @@ Every tagged release publishes assets for the three desktop platforms:
 |---|---|
 | Windows | `CANopen-Studio-vX.Y.Z-Windows-Setup.exe` (setup wizard) |
 | Windows | `CANopen-Studio-Windows-x64-Portable.zip` (portable) |
-| macOS | `CANopen-Studio-macOS-x64-Portable.tar.gz` |
+| macOS | `CANopen-Studio-macOS-x64.dmg` (disk image) |
 | Linux | `CANopen-Studio-Linux-x64-Portable.tar.gz` |
 
 ### Windows Setup Wizard
@@ -30,11 +30,23 @@ Every tagged release publishes assets for the three desktop platforms:
    - Start Menu program group with uninstaller
    - System uninstaller entry in Windows Settings / Control Panel
 
+### macOS Disk Image
+1. Download **`CANopen-Studio-macOS-x64.dmg`** and open it.
+2. Drag **CANopen Studio** onto the **Applications** shortcut in the same window.
+3. Eject the disk image.
+
+!!! warning "The first launch needs a right-click"
+    The application is signed ad hoc rather than with an Apple Developer ID, and
+    it is not notarized, so Gatekeeper refuses it on a plain double-click —
+    *"cannot be opened because the developer cannot be verified"*. Right-click
+    (or Control-click) the app and choose **Open**, then confirm once. macOS
+    remembers the choice and later launches behave normally. Building from
+    source, per section 2 or 3, avoids the prompt entirely.
+
 ### Portable Packages
 1. Download the portable archive for your platform.
 2. Extract anywhere (e.g. on a USB drive).
-3. Launch **`CANopen-Studio.exe`** on Windows, `CANopen-Studio.app` on macOS, or the
-   `CANopen-Studio` binary on Linux.
+3. Launch **`CANopen-Studio.exe`** on Windows, or the `CANopen-Studio` binary on Linux.
 
 ---
 
@@ -152,7 +164,8 @@ Whenever a Git tag matching `v*` is pushed, on Windows, macOS and Linux in paral
    into the package, so the published builds carry the native engine.
 2. PyInstaller builds the standalone application.
 3. Inno Setup compiles the Windows Setup wizard.
-4. A portable `.zip` (Windows) or `.tar.gz` (macOS, Linux) is created.
+4. A portable `.zip` (Windows) or `.tar.gz` (Linux) is created, and on macOS
+   `hdiutil` builds a `.dmg` holding the `.app` beside an Applications shortcut.
 5. Assets are automatically attached to the GitHub Release.
 
 ---

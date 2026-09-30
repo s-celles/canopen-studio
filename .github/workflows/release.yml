@@ -101,11 +101,33 @@ jobs:
         run: |
           Compress-Archive -Path dist/CANopen-Studio/* -DestinationPath dist/CANopen-Studio-Windows-x64-Portable.zip -Force
 
-      - name: Build Portable Archive (Unix)
-        if: runner.os != 'Windows'
+      - name: Build Portable Archive (Linux)
+        if: runner.os == 'Linux'
         run: |
           cd dist
-          if [ -d "CANopen-Studio.app" ]; then tar -czvf CANopen-Studio-${{ matrix.os_name }}-x64-Portable.tar.gz CANopen-Studio.app/; else tar -czvf CANopen-Studio-${{ matrix.os_name }}-x64-Portable.tar.gz CANopen-Studio/; fi
+          tar -czf CANopen-Studio-Linux-x64-Portable.tar.gz CANopen-Studio/
+
+      # macOS got a tarball only because it shared Linux's branch here. What
+      # PyInstaller produces is a real .app, and a disk image is how one is
+      # handed over: mount, drag onto Applications, eject. Archive Utility
+      # instead leaves the bundle loose in ~/Downloads, from where it runs but
+      # is never installed.
+      #
+      # ditto rather than cp -R: it preserves the extended attributes that
+      # carry the ad-hoc signature build_exe.py applies, and cp can drop them.
+      # No version in the filename, so re-running a tag replaces the asset
+      # rather than leaving a stale one beside the new one, which is how
+      # v0.9.0 ended up offering two Windows installers.
+      - name: Build Disk Image (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          staging="$(mktemp -d)/CANopen Studio"
+          mkdir -p "$staging"
+          ditto dist/CANopen-Studio.app "$staging/CANopen-Studio.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "CANopen Studio" -srcfolder "$staging" \
+            -ov -format UDZO dist/CANopen-Studio-macOS-x64.dmg
+          hdiutil verify dist/CANopen-Studio-macOS-x64.dmg
 
       - name: Install Inno Setup and Compile (Windows Only)
         if: runner.os == 'Windows'
@@ -135,4 +157,5 @@ jobs:
             dist/*-Setup.exe
             dist/*-Portable.zip
             dist/*-Portable.tar.gz
+            dist/*.dmg
           generate_release_notes: true

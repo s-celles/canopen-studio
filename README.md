@@ -35,7 +35,8 @@
 Download the latest build for your platform from **[GitHub Releases](https://github.com/s-celles/canopen-studio/releases)**:
 - **`CANopen-Studio-vX.Y.Z-Windows-Setup.exe`** (setup wizard with desktop & start menu shortcuts)
 - **`CANopen-Studio-Windows-x64-Portable.zip`** (portable executable)
-- **`CANopen-Studio-macOS-x64-Portable.tar.gz`** / **`CANopen-Studio-Linux-x64-Portable.tar.gz`**
+- **`CANopen-Studio-macOS-x64.dmg`** (drag onto Applications; the first launch needs a right-click → Open, the build being signed ad hoc)
+- **`CANopen-Studio-Linux-x64-Portable.tar.gz`**
 
 Released builds carry the compiled `canopen_core` engine; a Git checkout does not until you run `just rust-python`.
 
