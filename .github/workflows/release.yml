@@ -45,6 +45,25 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra ble
 
+      # v0.9.0 shipped stamped 0.8.2: the tag was pushed while main still pointed
+      # at the commit before the bump, so the build read the old version into the
+      # installer name, its AppVersion, and the updater's CURRENT_VERSION — which
+      # then offered every user an upgrade to the build they had just installed.
+      # Runs before the extension build, since __init__.py imports no submodule,
+      # so a mistagged release fails in seconds rather than after PyInstaller.
+      - name: Refuse a tag that disagrees with the package version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          declared=$(uv run python -c "import canopen_studio; print(canopen_studio.__version__)")
+          if [ "$TAG" != "v$declared" ]; then
+            echo "::error::tag $TAG names a version the tree does not carry: canopen_studio.__version__ is $declared. Tag the commit that bumps it."
+            exit 1
+          fi
+          echo "$TAG matches canopen_studio.__version__"
+
       # Without this the published binaries ship with no canopen_core at all.
       # uv sync cannot produce it — the build backend is plain setuptools and the
       # Rust workspace sits beside it — and PyInstaller can only bundle what is
