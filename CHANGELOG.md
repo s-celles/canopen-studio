@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-30
+
+A packaging release. **No application code changed since 0.9.0** — `src/` and
+`crates/` are byte-for-byte identical — so the studio behaves exactly as it did.
+What changes is how it is delivered, and that two release-process faults are
+closed.
+
+### Added
+- **macOS ships a disk image**, `CANopen-Studio-macOS-x64.dmg`, holding the
+  `.app` beside an Applications shortcut: mount, drag, eject. It had been a
+  `.tar.gz` only because macOS shared Linux's branch in the packaging step, and
+  Archive Utility leaves the bundle loose in `~/Downloads`, from where it runs
+  but is never installed. `ditto` copies the bundle rather than `cp -R`, which
+  can drop the extended attributes carrying its signature, and `hdiutil verify`
+  runs before upload.
+
+  This does not quiet Gatekeeper: the bundle is signed ad hoc, not with an Apple
+  Developer ID, and is not notarized, so the first launch still needs a
+  right-click and **Open**. The installation page now says so where a reader
+  meets it.
+
+### Fixed
+- **A tag naming a version the tree does not carry now fails the build.** v0.9.0
+  was tagged a minute before the commit bumping the version merged, so the
+  workflow built the previous commit: the installer came out named for 0.8.2,
+  with 0.8.2 in its `AppVersion` and in the bundle. Moving the tag afterwards
+  changed nothing, the build having already run — and because `updater.py`
+  compares `__version__` against the tag of `releases/latest`, every install of
+  that build was offered an upgrade to itself, permanently. The release workflow
+  now compares the two before building anything, right after `uv sync` and
+  before the extension build, so the job stops in seconds rather than after
+  PyInstaller has run on three platforms.
+
+### Changed
+- `CANopen-Studio-macOS-x64-Portable.tar.gz` is no longer published, the disk
+  image replacing it.
+
 ## [0.9.0] - 2026-09-29
 
 The OBD-II tab becomes a scan tool, and the studio stops treating a CAN bus and
